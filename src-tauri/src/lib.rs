@@ -1,5 +1,8 @@
 pub mod db;
 pub mod timer;
+pub mod tray;
+
+pub use tray::TrayManager;
 
 use db::{
     init_db, create_workblock, get_active_workblock, cancel_workblock,
@@ -11,7 +14,7 @@ use db::{
 use timer::TimerManager;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tauri::Manager;
+use tauri::{Manager, Emitter};
 
 // Re-export types for frontend
 pub use db::{Workblock, Interval, DailyArchive, WorkblockStatus, IntervalStatus};
@@ -218,15 +221,74 @@ pub fn run() {
             let timer_manager = Arc::new(Mutex::new(TimerManager::new(app.handle().clone())));
             app.manage(timer_manager.clone());
             
+            // Initialize tray manager
+            let tray_manager = Arc::new(Mutex::new(TrayManager::new(app.handle().clone())));
+            app.manage(tray_manager.clone());
+            
+            // Setup system tray
+            if let Err(e) = TrayManager::setup_tray(&app.handle()) {
+                eprintln!("Failed to setup system tray: {}", e);
+            }
+            
             // Restore active workblock if one exists (for app restart scenarios)
             tokio::spawn(async move {
                 let timer = timer_manager.lock().await;
                 if let Err(e) = timer.restore_active_workblock().await {
                     eprintln!("Failed to restore active workblock: {}", e);
                 }
+                drop(timer);
+                
+                // Refresh tray state after restoring workblock
+                let mut tray = tray_manager.lock().await;
+                tray.refresh_state().await;
             });
             
             Ok(())
+        })
+        .on_tray_icon_event(|app, event| {
+            TrayManager::handle_tray_event(app, event);
+        })
+        .on_menu_event(|app, event| {
+            // Handle menu item clicks
+            let id_str = event.id.0.as_str();
+            match id_str {
+                "start_workblock" => {
+                    if let Some(window) = app.get_webview_window("main") {
+                        let _ = window.show();
+                        let _ = window.set_focus();
+                        let _ = window.emit("tray-start-workblock", ());
+                    }
+                }
+                "view_summary" => {
+                    if let Some(window) = app.get_webview_window("main") {
+                        let _ = window.show();
+                        let _ = window.set_focus();
+                        let _ = window.emit("tray-view-summary", ());
+                    }
+                }
+                "view_last_words" => {
+                    if let Some(window) = app.get_webview_window("main") {
+                        let _ = window.show();
+                        let _ = window.set_focus();
+                        let _ = window.emit("tray-view-last-words", ());
+                    }
+                }
+                "show_window" => {
+                    if let Some(window) = app.get_webview_window("main") {
+                        let _ = window.show();
+                        let _ = window.set_focus();
+                    }
+                }
+                "hide_window" => {
+                    if let Some(window) = app.get_webview_window("main") {
+                        let _ = window.hide();
+                    }
+                }
+                "quit" => {
+                    app.exit(0);
+                }
+                _ => {}
+            }
         })
         .invoke_handler(tauri::generate_handler![
             greet,
