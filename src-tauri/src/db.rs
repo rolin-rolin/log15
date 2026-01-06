@@ -268,11 +268,19 @@ pub fn cancel_workblock(app: &AppHandle, workblock_id: i64) -> Result<Workblock>
     let conn = get_db_connection(app)?;
     let end_time = Local::now().to_rfc3339();
     
+    // Calculate duration
+    let workblock = get_workblock_by_id(app, workblock_id)?;
+    let start_time = DateTime::parse_from_rfc3339(&workblock.start_time)
+        .map_err(|e| rusqlite::Error::InvalidColumnType(0, format!("Invalid start_time: {}", e), rusqlite::types::Type::Text))?;
+    let end_time_dt = DateTime::parse_from_rfc3339(&end_time)
+        .map_err(|e| rusqlite::Error::InvalidColumnType(0, format!("Invalid end_time: {}", e), rusqlite::types::Type::Text))?;
+    let duration = (end_time_dt - start_time).num_minutes() as i32;
+    
     conn.execute(
         "UPDATE workblocks 
-         SET end_time = ?1, status = 'cancelled'
-         WHERE id = ?2",
-        params![end_time, workblock_id],
+         SET end_time = ?1, duration_minutes = ?2, status = 'cancelled'
+         WHERE id = ?3",
+        params![end_time, duration, workblock_id],
     )?;
     
     get_workblock_by_id(app, workblock_id)

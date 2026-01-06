@@ -1,51 +1,106 @@
-import { useState } from "react";
-import reactLogo from "./assets/react.svg";
+import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
+import PromptPage from "./pages/PromptPage";
 import "./App.css";
 
 function App() {
-  const [greetMsg, setGreetMsg] = useState("");
-  const [name, setName] = useState("");
+    const [currentView, setCurrentView] = useState<string>("main");
+    const [greetMsg, setGreetMsg] = useState("");
+    const [name, setName] = useState("");
 
-  async function greet() {
-    // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
-    setGreetMsg(await invoke("greet", { name }));
-  }
+    useEffect(() => {
+        // Check if we're in the prompt window (check URL hash)
+        const hash = window.location.hash;
+        if (hash === "#/prompt") {
+            setCurrentView("prompt");
+            return;
+        }
 
-  return (
-    <main className="container">
-      <h1>Welcome to Tauri + React</h1>
+        // Listen for interval-complete event to show prompt window
+        const setupListeners = async () => {
+            const unlisten = await listen("interval-complete", async (event: any) => {
+                const payload = event.payload as { interval_id?: number };
+                if (payload.interval_id) {
+                    try {
+                        await invoke("show_prompt_window_cmd", { intervalId: payload.interval_id });
+                    } catch (error) {
+                        console.error("Failed to show prompt window:", error);
+                    }
+                }
+            });
 
-      <div className="row">
-        <a href="https://vite.dev" target="_blank">
-          <img src="/vite.svg" className="logo vite" alt="Vite logo" />
-        </a>
-        <a href="https://tauri.app" target="_blank">
-          <img src="/tauri.svg" className="logo tauri" alt="Tauri logo" />
-        </a>
-        <a href="https://react.dev" target="_blank">
-          <img src={reactLogo} className="logo react" alt="React logo" />
-        </a>
-      </div>
-      <p>Click on the Tauri, Vite, and React logos to learn more.</p>
+            return unlisten;
+        };
 
-      <form
-        className="row"
-        onSubmit={(e) => {
-          e.preventDefault();
-          greet();
-        }}
-      >
-        <input
-          id="greet-input"
-          onChange={(e) => setName(e.currentTarget.value)}
-          placeholder="Enter a name..."
-        />
-        <button type="submit">Greet</button>
-      </form>
-      <p>{greetMsg}</p>
-    </main>
-  );
+        let unlistenPromise: Promise<() => void> | null = null;
+        setupListeners().then((unlisten) => {
+            unlistenPromise = Promise.resolve(unlisten);
+        });
+
+        // Listen for tray navigation events
+        const unlistenStart = listen("tray-start-workblock", () => {
+            setCurrentView("main");
+        });
+
+        const unlistenSummary = listen("tray-view-summary", () => {
+            setCurrentView("main");
+            // TODO: Navigate to summary view
+        });
+
+        const unlistenLastWords = listen("tray-view-last-words", () => {
+            setCurrentView("main");
+            // TODO: Show last words
+        });
+
+        return () => {
+            unlistenPromise?.then((fn) => fn());
+            unlistenStart.then((fn) => fn());
+            unlistenSummary.then((fn) => fn());
+            unlistenLastWords.then((fn) => fn());
+        };
+    }, []);
+
+    // Check URL hash on mount
+    useEffect(() => {
+        const hash = window.location.hash;
+        if (hash === "#/prompt") {
+            setCurrentView("prompt");
+        }
+    }, []);
+
+    async function greet() {
+        setGreetMsg(await invoke("greet", { name }));
+    }
+
+    if (currentView === "prompt") {
+        return <PromptPage />;
+    }
+
+    return (
+        <main className="container">
+            <h1>Log15 - Workblock Tracker</h1>
+            <p>Welcome! This is the main application window.</p>
+            <p>Workblock UI coming soon...</p>
+
+            {/* Temporary test UI */}
+            <form
+                className="row"
+                onSubmit={(e) => {
+                    e.preventDefault();
+                    greet();
+                }}
+            >
+                <input
+                    id="greet-input"
+                    onChange={(e) => setName(e.currentTarget.value)}
+                    placeholder="Enter a name..."
+                />
+                <button type="submit">Greet</button>
+            </form>
+            <p>{greetMsg}</p>
+        </main>
+    );
 }
 
 export default App;

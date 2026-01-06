@@ -1,6 +1,7 @@
 pub mod db;
 pub mod timer;
 pub mod tray;
+pub mod window_manager;
 
 pub use tray::TrayManager;
 
@@ -12,6 +13,7 @@ use db::{
     generate_workblock_visualization, generate_daily_aggregate, generate_daily_visualization_data,
 };
 use timer::TimerManager;
+use window_manager::WindowManager;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tauri::{Manager, Emitter};
@@ -126,9 +128,42 @@ async fn submit_interval_words(
     timer.cancel_auto_away_timer().await;
     drop(timer);
     
+    // Hide prompt window
+    let window_manager = app.state::<Arc<Mutex<WindowManager>>>();
+    let window_mgr = window_manager.lock().await;
+    window_mgr.hide_prompt_window().await.ok();
+    drop(window_mgr);
+    
     // Update interval with words
     update_interval_words(&app, interval_id, words, IntervalStatus::Recorded)
         .map_err(|e| e.to_string())
+}
+
+// Window management commands
+#[tauri::command]
+async fn show_prompt_window_cmd(
+    app: tauri::AppHandle,
+    interval_id: i64,
+) -> Result<(), String> {
+    let window_manager = app.state::<Arc<Mutex<WindowManager>>>();
+    let window_mgr = window_manager.lock().await;
+    
+    // Show the prompt window
+    window_mgr.show_prompt_window(interval_id).await?;
+    
+    // Start auto-away timer
+    let timer_manager = app.state::<Arc<Mutex<TimerManager>>>();
+    let timer = timer_manager.lock().await;
+    timer.start_auto_away_timer(interval_id).await?;
+    
+    Ok(())
+}
+
+#[tauri::command]
+async fn hide_prompt_window_cmd(app: tauri::AppHandle) -> Result<(), String> {
+    let window_manager = app.state::<Arc<Mutex<WindowManager>>>();
+    let window_mgr = window_manager.lock().await;
+    window_mgr.hide_prompt_window().await
 }
 
 #[tauri::command]
@@ -225,6 +260,10 @@ pub fn run() {
             let tray_manager = Arc::new(Mutex::new(TrayManager::new(app.handle().clone())));
             app.manage(tray_manager.clone());
             
+            // Initialize window manager
+            let window_manager = Arc::new(Mutex::new(WindowManager::new(app.handle().clone())));
+            app.manage(window_manager);
+            
             // Setup system tray
             if let Err(e) = TrayManager::setup_tray(&app.handle()) {
                 eprintln!("Failed to setup system tray: {}", e);
@@ -312,6 +351,8 @@ pub fn run() {
             get_daily_visualization_data_cmd,
             get_timer_state,
             get_interval_time_remaining,
+            show_prompt_window_cmd,
+            hide_prompt_window_cmd,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -81,10 +81,13 @@ impl TrayManager {
     pub async fn update_menu(&self) {
         let _has_active_workblock = get_active_workblock(&self.app).is_ok_and(|opt| opt.is_some());
         
-        // Check if there are completed workblocks today (summary available)
+        // Check if there are completed or cancelled workblocks today (summary available)
         let today = get_today_date();
         let _has_summary = get_workblocks_by_date(&self.app, &today)
-            .map(|wbs| wbs.iter().any(|wb| wb.status.as_str() == "completed"))
+            .map(|wbs| wbs.iter().any(|wb| {
+                let status = wb.status.as_str();
+                status == "completed" || status == "cancelled"
+            }))
             .unwrap_or(false);
 
         // Note: Menu item visibility updates would require recreating the menu
@@ -125,7 +128,10 @@ impl TrayManager {
         
         let today = get_today_date();
         let has_summary = get_workblocks_by_date(&self.app, &today)
-            .map(|wbs| wbs.iter().any(|wb| wb.status.as_str() == "completed"))
+            .map(|wbs| wbs.iter().any(|wb| {
+                let status = wb.status.as_str();
+                status == "completed" || status == "cancelled"
+            }))
             .unwrap_or(false);
 
         let new_state = if has_active {

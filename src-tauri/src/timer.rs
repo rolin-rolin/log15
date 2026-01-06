@@ -121,6 +121,9 @@ impl TimerManager {
                     state.prompt_shown_time = Some(prompt_time);
                     drop(state);
                     
+                    // Emit event to show prompt window (frontend will handle it)
+                    // The frontend will listen for interval-complete and call show_prompt_window_cmd
+                    
                     // Start auto-away timer in a separate task
                     let state_for_auto_away = Arc::clone(&state_clone);
                     let app_for_auto_away = app_clone.clone();
@@ -140,6 +143,9 @@ impl TimerManager {
                                             "Away from workspace".to_string(),
                                             IntervalStatus::AutoAway,
                                         );
+                                        
+                                        // Hide prompt window via command (safer approach)
+                                        // The auto-away will be handled by the timer's auto-away logic
                                         
                                         // Emit auto-away event
                                         let _ = app_for_auto_away.emit("auto-away", interval_id);
@@ -239,16 +245,25 @@ impl TimerManager {
             let state = state_clone.lock().await;
             if let Some(current_interval_id) = state.current_interval_id {
                 if current_interval_id == interval_id {
-                    // Auto-away: record "Away from workspace"
-                    let _ = update_interval_words(
-                        &app_clone,
-                        interval_id,
-                        "Away from workspace".to_string(),
-                        IntervalStatus::AutoAway,
-                    );
-                    
-                    // Emit auto-away event
-                    let _ = app_clone.emit("auto-away", interval_id);
+                    // Check if interval was already recorded
+                    if let Ok(Some(interval)) = get_current_interval(&app_clone, state.workblock_id.unwrap_or(0)) {
+                        if interval.id == Some(interval_id) && interval.words.is_none() {
+                            // Auto-away: record "Away from workspace"
+                            let _ = update_interval_words(
+                                &app_clone,
+                                interval_id,
+                                "Away from workspace".to_string(),
+                                IntervalStatus::AutoAway,
+                            );
+                            
+                            // Hide prompt window via command
+                            // Use invoke to call the hide command (safer than direct state access)
+                            let _ = app_clone.emit("auto-away-hide-prompt", interval_id);
+                            
+                            // Emit auto-away event
+                            let _ = app_clone.emit("auto-away", interval_id);
+                        }
+                    }
                 }
             }
         });
