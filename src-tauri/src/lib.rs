@@ -1,12 +1,17 @@
 pub mod db;
+pub mod timer;
 
 use db::{
-    init_db, create_workblock, get_active_workblock, complete_workblock, cancel_workblock,
+    init_db, create_workblock, get_active_workblock, cancel_workblock,
     get_workblocks_by_date,
     add_interval, update_interval_words, get_intervals_by_workblock, get_current_interval,
     check_and_reset_daily, get_archived_day, get_today_date,
     generate_workblock_visualization, generate_daily_aggregate, generate_daily_visualization_data,
 };
+use timer::TimerManager;
+use std::sync::Arc;
+use tokio::sync::Mutex;
+use tauri::Manager;
 
 // Re-export types for frontend
 pub use db::{Workblock, Interval, DailyArchive, WorkblockStatus, IntervalStatus};
@@ -28,7 +33,10 @@ fn init_database(app: tauri::AppHandle) -> Result<(), String> {
 
 // Workblock commands
 #[tauri::command]
-fn start_workblock(app: tauri::AppHandle, duration_minutes: i32) -> Result<Workblock, String> {
+async fn start_workblock(
+    app: tauri::AppHandle,
+    duration_minutes: i32,
+) -> Result<Workblock, String> {
     // Check and reset daily if needed
     check_and_reset_daily(&app).map_err(|e| e.to_string())?;
     
@@ -37,12 +45,43 @@ fn start_workblock(app: tauri::AppHandle, duration_minutes: i32) -> Result<Workb
         return Err(format!("Workblock {} is already active", active.id.unwrap()));
     }
     
-    create_workblock(&app, duration_minutes).map_err(|e| e.to_string())
+    // Create workblock
+    let workblock = create_workblock(&app, duration_minutes).map_err(|e| e.to_string())?;
+    let workblock_id = workblock.id.unwrap();
+    
+    // Get timer manager from app state
+    let timer_manager = app.state::<Arc<Mutex<TimerManager>>>();
+    let timer = timer_manager.lock().await;
+    
+    // Start the timer
+    timer.start_workblock(workblock_id, duration_minutes).await?;
+    
+    Ok(workblock)
 }
 
 #[tauri::command]
-fn stop_workblock(app: tauri::AppHandle, workblock_id: i64) -> Result<Workblock, String> {
-    complete_workblock(&app, workblock_id).map_err(|e| e.to_string())
+async fn stop_workblock(
+    app: tauri::AppHandle,
+    workblock_id: i64,
+) -> Result<Workblock, String> {
+    // Get the workblock first (before it's completed)
+    let workblock = get_active_workblock(&app)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "Workblock not found".to_string())?;
+    
+    // Get timer manager and stop the timer
+    let timer_manager = app.state::<Arc<Mutex<TimerManager>>>();
+    let timer = timer_manager.lock().await;
+    
+    // Stop the timer (this will also complete the workblock)
+    timer.stop_workblock(workblock_id).await?;
+    
+    // Get the completed workblock
+    get_workblocks_by_date(&app, &workblock.date)
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .find(|wb| wb.id == Some(workblock_id))
+        .ok_or_else(|| "Completed workblock not found".to_string())
 }
 
 #[tauri::command]
@@ -73,11 +112,18 @@ fn create_interval(app: tauri::AppHandle, workblock_id: i64, interval_number: i3
 }
 
 #[tauri::command]
-fn submit_interval_words(
+async fn submit_interval_words(
     app: tauri::AppHandle,
     interval_id: i64,
     words: String,
 ) -> Result<Interval, String> {
+    // Cancel auto-away timer since user submitted words
+    let timer_manager = app.state::<Arc<Mutex<TimerManager>>>();
+    let timer = timer_manager.lock().await;
+    timer.cancel_auto_away_timer().await;
+    drop(timer);
+    
+    // Update interval with words
     update_interval_words(&app, interval_id, words, IntervalStatus::Recorded)
         .map_err(|e| e.to_string())
 }
@@ -94,8 +140,25 @@ fn get_intervals_by_workblock_cmd(app: tauri::AppHandle, workblock_id: i64) -> R
 }
 
 #[tauri::command]
-fn get_current_interval_cmd(app: tauri::AppHandle, workblock_id: i64) -> Result<Option<Interval>, String> {
+async fn get_current_interval_cmd(
+    app: tauri::AppHandle,
+    workblock_id: i64,
+) -> Result<Option<Interval>, String> {
     get_current_interval(&app, workblock_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn get_timer_state(app: tauri::AppHandle) -> Result<timer::TimerState, String> {
+    let timer_manager = app.state::<Arc<Mutex<TimerManager>>>();
+    let timer = timer_manager.lock().await;
+    Ok(timer.get_state().await)
+}
+
+#[tauri::command]
+async fn get_interval_time_remaining(app: tauri::AppHandle) -> Result<Option<i64>, String> {
+    let timer_manager = app.state::<Arc<Mutex<TimerManager>>>();
+    let timer: tokio::sync::MutexGuard<'_, TimerManager> = timer_manager.lock().await;
+    Ok(timer.get_interval_time_remaining().await)
 }
 
 // Daily commands
@@ -151,6 +214,18 @@ pub fn run() {
                 eprintln!("Failed to check daily reset: {}", e);
             }
             
+            // Initialize timer manager
+            let timer_manager = Arc::new(Mutex::new(TimerManager::new(app.handle().clone())));
+            app.manage(timer_manager.clone());
+            
+            // Restore active workblock if one exists (for app restart scenarios)
+            tokio::spawn(async move {
+                let timer = timer_manager.lock().await;
+                if let Err(e) = timer.restore_active_workblock().await {
+                    eprintln!("Failed to restore active workblock: {}", e);
+                }
+            });
+            
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -173,6 +248,8 @@ pub fn run() {
             get_workblock_visualization,
             get_daily_aggregate_cmd,
             get_daily_visualization_data_cmd,
+            get_timer_state,
+            get_interval_time_remaining,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
