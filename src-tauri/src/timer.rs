@@ -1,13 +1,15 @@
 // Timer system for managing workblocks and 15-minute intervals
 
 use crate::db::{
-    add_interval, get_active_workblock, get_current_interval, update_interval_words,
-    complete_workblock, IntervalStatus,
+    add_interval, get_active_workblock, get_current_interval, get_interval_by_id,
+    get_workblock_by_id, update_interval_words, complete_workblock, IntervalStatus,
 };
+use crate::tray::{TrayIconState, TrayManager};
+use crate::window_manager::WindowManager;
 use chrono::{DateTime, Local};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::Mutex;
 use tokio::time::{interval, Duration};
 
@@ -68,13 +70,13 @@ impl TimerManager {
         state.workblock_id = Some(workblock_id);
         state.current_interval_number = 0;
         state.is_running = true;
-        state.interval_start_time = Some(Local::now());
         
-        // Create first interval
+        // Create first interval and set its start time
         match add_interval(&self.app, workblock_id, 1) {
             Ok(interval) => {
                 state.current_interval_id = interval.id;
                 state.current_interval_number = 1;
+                state.interval_start_time = Some(Local::now()); // Set start time when interval is created
             }
             Err(e) => {
                 state.is_running = false;
@@ -90,14 +92,19 @@ impl TimerManager {
             // TESTING: 10 seconds instead of 15 minutes
             let mut interval_timer = interval(Duration::from_secs(10)); // TESTING: Changed from 15 * 60
             interval_timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-            
-            // Wait for first tick (10 seconds from now for testing)
+
+            // Consume the immediate first tick to establish the baseline "now"
+            // After this, each tick represents a full interval duration passing
             interval_timer.tick().await;
-            
+
+            // Start with interval 1 (the first interval that was already created)
             let mut current_interval_num = 1;
             let total_intervals = total_intervals;
             
             loop {
+                // Wait for the current interval to complete (full duration)
+                interval_timer.tick().await;
+                
                 // Check if timer should still be running
                 let state = state_clone.lock().await;
                 if !state.is_running || state.workblock_id.is_none() {
@@ -107,16 +114,19 @@ impl TimerManager {
                 drop(state);
                 
                 // Emit interval-complete event with interval info
+                // Use the current interval number BEFORE incrementing
                 let state = state_clone.lock().await;
                 let interval_id = state.current_interval_id;
+                let interval_number = state.current_interval_number; // Use state's interval number
                 let prompt_time = Local::now();
                 drop(state);
                 
                 if let Some(interval_id) = interval_id {
+                    println!("[TIMER] Emitting interval-complete: interval_id={}, interval_number={}", interval_id, interval_number);
                     let _ = app_clone.emit("interval-complete", serde_json::json!({
                         "workblock_id": workblock_id,
                         "interval_id": interval_id,
-                        "interval_number": current_interval_num
+                        "interval_number": interval_number
                     }));
                     
                     // Update prompt shown time
@@ -126,68 +136,33 @@ impl TimerManager {
                     
                     // Emit event to show prompt window (frontend will handle it)
                     // The frontend will listen for interval-complete and call show_prompt_window_cmd
-                    
-                    // Start auto-away timer in a separate task
-                    let state_for_auto_away = Arc::clone(&state_clone);
-                    let app_for_auto_away = app_clone.clone();
-                    tokio::spawn(async move {
-                        // TESTING: 5 seconds instead of 10 minutes
-                        tokio::time::sleep(Duration::from_secs(5)).await; // TESTING: Changed from 10 * 60
-                        
-                        let state = state_for_auto_away.lock().await;
-                        if let Some(current_interval_id) = state.current_interval_id {
-                            if current_interval_id == interval_id {
-                                // Check if interval was already recorded
-                                if let Ok(Some(interval)) = get_current_interval(&app_for_auto_away, workblock_id) {
-                                    if interval.id == Some(interval_id) && interval.words.is_none() {
-                                        // Auto-away: record "Away from workspace"
-                                        let _ = update_interval_words(
-                                            &app_for_auto_away,
-                                            interval_id,
-                                            "Away from workspace".to_string(),
-                                            IntervalStatus::AutoAway,
-                                        );
-                                        
-                                        // Hide prompt window via command (safer approach)
-                                        // The auto-away will be handled by the timer's auto-away logic
-                                        
-                                        // Emit auto-away event
-                                        let _ = app_for_auto_away.emit("auto-away", interval_id);
-                                    }
-                                }
-                            }
-                        }
-                    });
                 }
                 
                 // Check if we've reached the total number of intervals
+                // Increment for next interval
                 current_interval_num += 1;
                 if current_interval_num > total_intervals {
-                    // Workblock is complete
-                    let mut state = state_clone.lock().await;
-                    state.is_running = false;
-                    drop(state);
-                    
-                    // Complete the workblock
-                    let _ = complete_workblock(&app_clone, workblock_id);
-                    
-                    // Emit workblock-complete event
-                    let _ = app_clone.emit("workblock-complete", workblock_id);
+                    // We've completed the final interval tick.
+                    // IMPORTANT: Do NOT mark the workblock completed here.
+                    // The workblock should only complete after the final interval gets recorded
+                    // (either user submission or auto-away).
+                    println!(
+                        "[TIMER] Final interval tick complete (interval_number={}); awaiting final prompt submission/auto-away",
+                        interval_number
+                    );
                     break;
                 }
                 
-                // Create next interval
+                // Create next interval (for the next cycle)
                 let mut state = state_clone.lock().await;
                 if let Ok(new_interval) = add_interval(&app_clone, workblock_id, current_interval_num) {
                     state.current_interval_id = new_interval.id;
-                    state.current_interval_number = current_interval_num;
+                    state.current_interval_number = current_interval_num; // Update state with new interval number
                     state.interval_start_time = Some(Local::now());
-                    state.prompt_shown_time = Some(Local::now()); // Prompt should be shown now
+                    // Don't set prompt_shown_time here - it will be set when the prompt actually appears
+                    println!("[TIMER] Created next interval: interval_number={}", current_interval_num);
                 }
                 drop(state);
-                
-                // Wait for next interval
-                interval_timer.tick().await;
             }
         });
         
@@ -240,32 +215,70 @@ impl TimerManager {
         
         let app_clone = self.app.clone();
         let state_clone = Arc::clone(&self.state);
+        let interval_handle_clone = Arc::clone(&self.interval_handle);
         
         let handle = tokio::spawn(async move {
             // TESTING: 5 seconds instead of 10 minutes
             tokio::time::sleep(Duration::from_secs(5)).await; // TESTING: Changed from 10 * 60
             
-            // Check if interval still exists and hasn't been recorded
-            let state = state_clone.lock().await;
-            if let Some(current_interval_id) = state.current_interval_id {
-                if current_interval_id == interval_id {
-                    // Check if interval was already recorded
-                    if let Ok(Some(interval)) = get_current_interval(&app_clone, state.workblock_id.unwrap_or(0)) {
-                        if interval.id == Some(interval_id) && interval.words.is_none() {
-                            // Auto-away: record "Away from workspace"
-                            let _ = update_interval_words(
-                                &app_clone,
-                                interval_id,
-                                "Away from workspace".to_string(),
-                                IntervalStatus::AutoAway,
+            // Check if the specific interval still has no recorded words
+            if let Ok(interval) = get_interval_by_id(&app_clone, interval_id) {
+                if interval.words.is_none() {
+                    // Auto-away: record "Away from workspace"
+                    let _ = update_interval_words(
+                        &app_clone,
+                        interval_id,
+                        "Away from workspace".to_string(),
+                        IntervalStatus::AutoAway,
+                    );
+                    
+                    // Hide prompt window - emit events that frontend will handle
+                    println!("[TIMER] Auto-away: Recording 'Away from workspace' for interval {}", interval_id);
+                    
+                    // Emit auto-away event (PromptWindow listens for this)
+                    let _ = app_clone.emit("auto-away", interval_id);
+                    
+                    // Also emit prompt-hide to ensure window closes
+                    let _ = app_clone.emit("prompt-hide", ());
+                    
+                    // Call hide command directly to ensure window closes
+                    // Note: We use try_state which returns Option, and Tauri uses async_runtime::Mutex
+                    if let Some(window_mgr_state) = app_clone.try_state::<Arc<tauri::async_runtime::Mutex<WindowManager>>>() {
+                        let window_mgr = window_mgr_state.lock().await;
+                        let _ = window_mgr.hide_prompt_window().await;
+                        println!("[TIMER] Auto-away: Called hide_prompt_window");
+                    }
+
+                    // If this was the last interval, finalize the workblock now.
+                    // (Timer loop intentionally does not complete the workblock on the last tick.)
+                    if let Ok(workblock) = get_workblock_by_id(&app_clone, interval.workblock_id) {
+                        let total_intervals = workblock.duration_minutes.unwrap_or(60) * 6; // TESTING
+                        let is_last_interval = interval.interval_number >= total_intervals;
+
+                        if is_last_interval {
+                            println!(
+                                "[TIMER] Auto-away on final interval; completing workblock_id={}",
+                                interval.workblock_id
                             );
-                            
-                            // Hide prompt window via command
-                            // Use invoke to call the hide command (safer than direct state access)
-                            let _ = app_clone.emit("auto-away-hide-prompt", interval_id);
-                            
-                            // Emit auto-away event
-                            let _ = app_clone.emit("auto-away", interval_id);
+
+                            let _ = complete_workblock(&app_clone, interval.workblock_id);
+                            let _ = app_clone.emit("workblock-complete", interval.workblock_id);
+
+                            // Update tray state to SummaryReady
+                            if let Some(tray_mgr_state) = app_clone.try_state::<Arc<Mutex<TrayManager>>>() {
+                                let mut tray = tray_mgr_state.lock().await;
+                                tray.update_icon_state(TrayIconState::SummaryReady).await;
+                            }
+
+                            // Reset timer state
+                            let mut state = state_clone.lock().await;
+                            *state = TimerState::default();
+                            drop(state);
+
+                            // Stop interval ticking task if it still exists
+                            if let Some(h) = interval_handle_clone.lock().await.take() {
+                                h.abort();
+                            }
                         }
                     }
                 }

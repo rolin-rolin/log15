@@ -74,6 +74,12 @@ async fn stop_workblock(
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "Workblock not found".to_string())?;
     
+    // Hide prompt window if it's open
+    let window_manager = app.state::<Arc<Mutex<WindowManager>>>();
+    let window_mgr = window_manager.lock().await;
+    window_mgr.hide_prompt_window().await.ok();
+    drop(window_mgr);
+    
     // Get timer manager and stop the timer
     let timer_manager = app.state::<Arc<Mutex<TimerManager>>>();
     let timer = timer_manager.lock().await;
@@ -90,7 +96,13 @@ async fn stop_workblock(
 }
 
 #[tauri::command]
-fn cancel_workblock_cmd(app: tauri::AppHandle, workblock_id: i64) -> Result<Workblock, String> {
+async fn cancel_workblock_cmd(app: tauri::AppHandle, workblock_id: i64) -> Result<Workblock, String> {
+    // Hide prompt window if it's open
+    let window_manager = app.state::<Arc<Mutex<WindowManager>>>();
+    let window_mgr = window_manager.lock().await;
+    window_mgr.hide_prompt_window().await.ok();
+    drop(window_mgr);
+    
     cancel_workblock(&app, workblock_id).map_err(|e| e.to_string())
 }
 
@@ -155,6 +167,12 @@ async fn submit_interval_words(
         let mut tray = tray_manager.lock().await;
         tray.update_icon_state(crate::tray::TrayIconState::SummaryReady).await;
         drop(tray);
+
+        // Finalize the workblock ONLY after the last interval is recorded.
+        // (Timer loop intentionally does not complete the workblock on the last tick.)
+        let timer_manager = app.state::<Arc<Mutex<TimerManager>>>();
+        let timer = timer_manager.lock().await;
+        timer.stop_workblock(workblock_id).await.ok();
     } else {
         // Hide prompt window normally
         window_mgr.hide_prompt_window().await.ok();
@@ -173,11 +191,20 @@ async fn show_prompt_window_cmd(
     app: tauri::AppHandle,
     interval_id: i64,
 ) -> Result<(), String> {
+    println!("[WINDOW] show_prompt_window_cmd called with interval_id={}", interval_id);
     let window_manager = app.state::<Arc<Mutex<WindowManager>>>();
     let window_mgr = window_manager.lock().await;
     
     // Show the prompt window
-    window_mgr.show_prompt_window(interval_id).await?;
+    match window_mgr.show_prompt_window(interval_id).await {
+        Ok(_) => {
+            println!("[WINDOW] Successfully showed prompt window");
+        }
+        Err(e) => {
+            eprintln!("[WINDOW] Failed to show prompt window: {}", e);
+            return Err(e);
+        }
+    }
     
     // Start auto-away timer
     let timer_manager = app.state::<Arc<Mutex<TimerManager>>>();

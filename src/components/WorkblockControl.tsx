@@ -84,6 +84,13 @@ export default function WorkblockControl() {
 
         setLoading(true);
         try {
+            // Hide prompt window if it's open
+            try {
+                await invoke("hide_prompt_window_cmd");
+            } catch (e) {
+                // Ignore errors - window might not be open
+            }
+
             await invoke("stop_workblock", {
                 workblockId: activeWorkblock.id,
             });
@@ -107,6 +114,13 @@ export default function WorkblockControl() {
 
         setLoading(true);
         try {
+            // Hide prompt window if it's open
+            try {
+                await invoke("hide_prompt_window_cmd");
+            } catch (e) {
+                // Ignore errors - window might not be open
+            }
+
             await invoke("cancel_workblock_cmd", {
                 workblockId: activeWorkblock.id,
             });

@@ -14,7 +14,9 @@ export default function PromptWindow({ intervalId }: PromptWindowProps) {
     const [showSummaryReady, setShowSummaryReady] = useState(false);
 
     useEffect(() => {
+        console.log("[PROMPT_WINDOW] intervalId changed:", intervalId);
         if (intervalId) {
+            console.log("[PROMPT_WINDOW] Setting isVisible to true");
             setIsVisible(true);
         }
     }, [intervalId]);
@@ -22,7 +24,16 @@ export default function PromptWindow({ intervalId }: PromptWindowProps) {
     useEffect(() => {
         // Listen for hide event
         const unlisten = listen("prompt-hide", () => {
+            console.log("[PROMPT_WINDOW] Received prompt-hide event");
             handleFadeOut();
+        });
+
+        // Listen for auto-away event (window should close)
+        const unlistenAutoAway = listen("auto-away", () => {
+            console.log("[PROMPT_WINDOW] Received auto-away event, closing window");
+            handleFadeOut();
+            // Also call hide command to ensure window is closed
+            invoke("hide_prompt_window_cmd").catch(console.error);
         });
 
         // Listen for show summary ready event
@@ -39,6 +50,7 @@ export default function PromptWindow({ intervalId }: PromptWindowProps) {
 
         return () => {
             unlisten.then((fn) => fn());
+            unlistenAutoAway.then((fn) => fn());
             unlistenSummary.then((fn) => fn());
             unlistenClose.then((fn) => fn());
         };

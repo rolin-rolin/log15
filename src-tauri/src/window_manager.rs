@@ -1,6 +1,6 @@
 // Window manager for overlay prompt windows
 
-use tauri::{AppHandle, Emitter, WebviewUrl, WebviewWindowBuilder};
+use tauri::{AppHandle, Manager, Emitter, WebviewUrl, WebviewWindowBuilder};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -22,16 +22,27 @@ impl WindowManager {
     }
 
     /// Show the prompt window for an interval
+    /// Always creates a fresh window - closes any existing window first
     pub async fn show_prompt_window(&self, interval_id: i64) -> Result<(), String> {
-        // Check if window already exists
-        let mut prompt = self.prompt_window.lock().await;
+        println!("[WINDOW_MGR] show_prompt_window called with interval_id={}", interval_id);
         
-        if prompt.is_some() {
-            // Window already exists, just update the interval ID
-            *self.current_interval_id.lock().await = Some(interval_id);
-            return Ok(());
+        // First, close any existing window (simplifies state management)
+        self.hide_prompt_window().await.ok(); // Ignore errors if no window exists
+        
+        // Wait a moment for window to fully close before creating a new one
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+        
+        // Double-check: if window still exists in Tauri, try to close it again
+        if let Some(existing_window) = self.app.get_webview_window("prompt") {
+            println!("[WINDOW_MGR] Window still exists after hide, force closing");
+            let _ = existing_window.close();
+            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
         }
+        
+        // Store the new interval ID
+        *self.current_interval_id.lock().await = Some(interval_id);
 
+        println!("[WINDOW_MGR] Creating new prompt window");
         // Create the prompt window
         // For now, we'll use a URL that points to a route in the main app
         // In production, you might want a separate HTML file
@@ -45,37 +56,84 @@ impl WindowManager {
         .decorations(false)
         .always_on_top(true)
         .skip_taskbar(true)
-        .visible(false) // Start hidden, will be shown after positioning
+        .visible(true) // Start visible - we'll position it immediately
         .build()
-        .map_err(|e| format!("Failed to create prompt window: {}", e))?;
+        .map_err(|e| {
+            eprintln!("[WINDOW_MGR] Failed to create window: {}", e);
+            format!("Failed to create prompt window: {}", e)
+        })?;
+        
+        println!("[WINDOW_MGR] Window created successfully");
 
         // Position window at bottom-right of screen
+        // Wait a moment for window to be ready before positioning
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+        
         if let Ok(monitor) = window.current_monitor() {
             if let Some(monitor) = monitor {
                 let screen_size = monitor.size();
-                // Use default size for positioning (window might not have size yet)
+                // Convert physical size to logical size (accounting for DPI scaling)
+                let scale_factor = monitor.scale_factor();
+                let logical_width = screen_size.width as f64 / scale_factor;
+                let logical_height = screen_size.height as f64 / scale_factor;
+                
+                // Use default size for positioning
                 let window_width = 300.0;
-                let window_height = 180.0; // Updated to match new window height
+                let window_height = 180.0;
                 
-                let x = screen_size.width as f64 - window_width - 20.0; // 20px margin
-                let y = screen_size.height as f64 - window_height - 20.0; // 20px margin
+                let x = logical_width - window_width - 20.0; // 20px margin
+                let y = logical_height - window_height - 20.0; // 20px margin
                 
-                let _ = window.set_position(tauri::LogicalPosition::new(x, y));
+                println!("[WINDOW_MGR] Positioning window at logical ({}, {}) on screen logical size ({}, {}), scale_factor: {}", 
+                    x, y, logical_width, logical_height, scale_factor);
+                
+                let pos_result = window.set_position(tauri::LogicalPosition::new(x, y));
+                match pos_result {
+                    Ok(_) => println!("[WINDOW_MGR] Window positioned successfully"),
+                    Err(e) => eprintln!("[WINDOW_MGR] Failed to position window: {}", e),
+                }
+            } else {
+                eprintln!("[WINDOW_MGR] No monitor found");
             }
+        } else {
+            eprintln!("[WINDOW_MGR] Failed to get current monitor");
         }
 
-        // Store interval ID
-        *self.current_interval_id.lock().await = Some(interval_id);
-
         // Show window with fade-in (handled by frontend CSS)
-        window.show().map_err(|e| format!("Failed to show window: {}", e))?;
+        println!("[WINDOW_MGR] Showing window");
+        
+        window.show().map_err(|e| {
+            eprintln!("[WINDOW_MGR] Failed to show window: {}", e);
+            format!("Failed to show window: {}", e)
+        })?;
+        
         window.set_focus().ok();
+        
+        // Verify window is actually visible
+        let is_visible = window.is_visible().unwrap_or(false);
+        println!("[WINDOW_MGR] Window shown and focused. Is visible: {}", is_visible);
+        
+        // Get window position for debugging
+        if let Ok(pos) = window.outer_position() {
+            println!("[WINDOW_MGR] Window position: {:?}", pos);
+        }
+        
+        if let Ok(size) = window.outer_size() {
+            println!("[WINDOW_MGR] Window size: {:?}", size);
+        }
 
-        // Send interval ID to frontend
+        // Send interval ID to frontend BEFORE storing (so event is ready when window loads)
+        println!("[WINDOW_MGR] Emitting prompt-interval-id event with interval_id={}", interval_id);
         window
             .emit("prompt-interval-id", interval_id)
-            .map_err(|e| format!("Failed to emit interval ID: {}", e))?;
+            .map_err(|e| {
+                eprintln!("[WINDOW_MGR] Failed to emit interval ID: {}", e);
+                format!("Failed to emit interval ID: {}", e)
+            })?;
+        println!("[WINDOW_MGR] Event emitted successfully");
 
+        // Store window in state AFTER everything is set up
+        let mut prompt = self.prompt_window.lock().await;
         *prompt = Some(window);
 
         Ok(())
@@ -98,11 +156,28 @@ impl WindowManager {
         Ok(())
     }
 
-    /// Hide the prompt window (also closes summary if open)
+    /// Hide the prompt window
+    /// Closes the window and clears all state
     pub async fn hide_prompt_window(&self) -> Result<(), String> {
+        println!("[WINDOW_MGR] hide_prompt_window called");
         let mut prompt = self.prompt_window.lock().await;
         
-        if let Some(window) = prompt.take() {
+        // Get window to hide - check our state first
+        let window_to_close = if let Some(window) = prompt.as_ref() {
+            // Window exists in our state
+            Some(window)
+        } else if let Some(window) = self.app.get_webview_window("prompt") {
+            // Window exists in Tauri but not in our state - restore it temporarily
+            // This can happen if state was cleared but window wasn't closed
+            println!("[WINDOW_MGR] Window exists in Tauri but not in state, closing it");
+            *prompt = Some(window);
+            prompt.as_ref()
+        } else {
+            println!("[WINDOW_MGR] No window to hide");
+            return Ok(());
+        };
+        
+        if let Some(window) = window_to_close {
             // Check if summary is showing
             let is_summary = *self.is_summary_ready.lock().await;
             
@@ -127,8 +202,13 @@ impl WindowManager {
                 tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
             }
             
-            window.hide().map_err(|e| format!("Failed to hide window: {}", e))?;
+            // Close the window
+            window.close().map_err(|e| format!("Failed to close window: {}", e))?;
+            
+            // Clear all state
             *self.current_interval_id.lock().await = None;
+            *prompt = None;
+            println!("[WINDOW_MGR] Window closed successfully");
         }
 
         Ok(())
