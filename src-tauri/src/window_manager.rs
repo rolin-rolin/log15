@@ -65,7 +65,7 @@ impl WindowManager {
         
         println!("[WINDOW_MGR] Window created successfully");
 
-        // Position window at bottom-right of screen
+        // Position window at top-right of screen
         // Wait a moment for window to be ready before positioning
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
         
@@ -81,8 +81,8 @@ impl WindowManager {
                 let window_width = 300.0;
                 let window_height = 180.0;
                 
-                let x = logical_width - window_width - 20.0; // 20px margin
-                let y = logical_height - window_height - 20.0; // 20px margin
+                let x = logical_width - window_width - 20.0; // 20px margin from right
+                let y = 20.0; // 20px margin from top
                 
                 println!("[WINDOW_MGR] Positioning window at logical ({}, {}) on screen logical size ({}, {}), scale_factor: {}", 
                     x, y, logical_width, logical_height, scale_factor);
