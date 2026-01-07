@@ -18,6 +18,10 @@ export default function PromptWindow({ intervalId }: PromptWindowProps) {
         if (intervalId) {
             console.log("[PROMPT_WINDOW] Setting isVisible to true");
             setIsVisible(true);
+            // Reset state when new interval comes in
+            setShowCheckmark(false);
+            setShowSummaryReady(false);
+            setWords("");
         }
     }, [intervalId]);
 
@@ -112,10 +116,6 @@ export default function PromptWindow({ intervalId }: PromptWindowProps) {
         }
     };
 
-    if (!intervalId && !isVisible) {
-        return null;
-    }
-
     return (
         <div className={`prompt-container ${isVisible ? "fade-in" : "fade-out"}`}>
             {showSummaryReady ? (
@@ -131,7 +131,7 @@ export default function PromptWindow({ intervalId }: PromptWindowProps) {
                 <div className="checkmark-container">
                     <div className="checkmark">✓</div>
                 </div>
-            ) : (
+            ) : intervalId ? (
                 <div className="prompt-content">
                     <label htmlFor="words-input" className="prompt-label">
                         What did you do? (1-2 words)
@@ -150,6 +150,10 @@ export default function PromptWindow({ intervalId }: PromptWindowProps) {
                     <button onClick={handleSubmit} disabled={!words.trim()} className="submit-button">
                         Submit
                     </button>
+                </div>
+            ) : (
+                <div className="prompt-content">
+                    <div className="loading-message">Loading...</div>
                 </div>
             )}
         </div>

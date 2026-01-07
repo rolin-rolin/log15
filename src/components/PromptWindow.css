@@ -187,3 +187,10 @@
 .close-summary-button:hover {
     background: #357abd;
 }
+
+.loading-message {
+    text-align: center;
+    color: #666;
+    font-size: 14px;
+    padding: 20px;
+}
