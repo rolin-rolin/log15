@@ -11,6 +11,7 @@ export default function PromptWindow({ intervalId }: PromptWindowProps) {
     const [words, setWords] = useState("");
     const [showCheckmark, setShowCheckmark] = useState(false);
     const [isVisible, setIsVisible] = useState(false);
+    const [showSummaryReady, setShowSummaryReady] = useState(false);
 
     useEffect(() => {
         if (intervalId) {
@@ -24,8 +25,22 @@ export default function PromptWindow({ intervalId }: PromptWindowProps) {
             handleFadeOut();
         });
 
+        // Listen for show summary ready event
+        const unlistenSummary = listen("show-summary-ready", () => {
+            setShowSummaryReady(true);
+            setShowCheckmark(false);
+            setWords("");
+        });
+
+        // Listen for close summary event
+        const unlistenClose = listen("close-summary", () => {
+            handleFadeOut();
+        });
+
         return () => {
             unlisten.then((fn) => fn());
+            unlistenSummary.then((fn) => fn());
+            unlistenClose.then((fn) => fn());
         };
     }, []);
 
@@ -47,18 +62,35 @@ export default function PromptWindow({ intervalId }: PromptWindowProps) {
 
         // Submit words
         try {
-            await invoke("submit_interval_words", {
+            const result = await invoke<{ is_last_interval: boolean }>("submit_interval_words", {
                 intervalId: intervalId,
                 words: words.trim(),
             });
 
-            // Fade out after showing checkmark
-            setTimeout(() => {
-                handleFadeOut();
-            }, 1000); // Show checkmark for 1 second
+            // If this is the last interval, show summary ready instead of fading out
+            if (result.is_last_interval) {
+                // Wait a moment for checkmark, then show summary
+                setTimeout(() => {
+                    setShowSummaryReady(true);
+                    setShowCheckmark(false);
+                }, 1000);
+            } else {
+                // Fade out after showing checkmark
+                setTimeout(() => {
+                    handleFadeOut();
+                }, 1000); // Show checkmark for 1 second
+            }
         } catch (error) {
             console.error("Failed to submit words:", error);
             setShowCheckmark(false);
+        }
+    };
+
+    const handleCloseSummary = async () => {
+        try {
+            await invoke("hide_prompt_window_cmd");
+        } catch (error) {
+            console.error("Failed to close summary window:", error);
         }
     };
 
@@ -74,7 +106,16 @@ export default function PromptWindow({ intervalId }: PromptWindowProps) {
 
     return (
         <div className={`prompt-container ${isVisible ? "fade-in" : "fade-out"}`}>
-            {showCheckmark ? (
+            {showSummaryReady ? (
+                <div className="summary-ready-content">
+                    <div className="summary-icon">📊</div>
+                    <h3 className="summary-title">Summary Ready!</h3>
+                    <p className="summary-message">Your workblock summary is ready to view.</p>
+                    <button onClick={handleCloseSummary} className="close-summary-button">
+                        Close
+                    </button>
+                </div>
+            ) : showCheckmark ? (
                 <div className="checkmark-container">
                     <div className="checkmark">✓</div>
                 </div>

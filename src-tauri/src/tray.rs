@@ -124,24 +124,23 @@ impl TrayManager {
 
     /// Update tray state based on workblock status
     pub async fn refresh_state(&mut self) {
-        let has_active = get_active_workblock(&self.app).is_ok_and(|opt| opt.is_some());
+        // Check if summary window is open first (highest priority)
+        // We'll check this via a command instead of direct state access
+        // The window manager will update tray state when summary opens/closes
         
-        let today = get_today_date();
-        let has_summary = get_workblocks_by_date(&self.app, &today)
-            .map(|wbs| wbs.iter().any(|wb| {
-                let status = wb.status.as_str();
-                status == "completed" || status == "cancelled"
-            }))
-            .unwrap_or(false);
+        let has_active = get_active_workblock(&self.app).is_ok_and(|opt| opt.is_some());
 
         let new_state = if has_active {
             TrayIconState::Active
-        } else if has_summary {
-            TrayIconState::SummaryReady
         } else {
+            // Only set to Idle if summary window is not open
+            // Summary window state is managed separately via update_icon_state calls
             TrayIconState::Idle
         };
 
-        self.update_icon_state(new_state).await;
+        // Only update if not already in SummaryReady state (which is managed by window manager)
+        if self.current_state != TrayIconState::SummaryReady {
+            self.update_icon_state(new_state).await;
+        }
     }
 }

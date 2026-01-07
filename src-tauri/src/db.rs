@@ -618,6 +618,7 @@ pub struct TimelineData {
     pub end_time: Option<String>,
     pub words: Option<String>,
     pub duration_minutes: i32,
+    pub workblock_status: Option<String>, // "active", "completed", or "cancelled"
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -649,6 +650,7 @@ pub struct AggregateTimelineData {
     pub end_time: Option<String>,
     pub words: Option<String>,
     pub duration_minutes: i32,
+    pub workblock_status: Option<String>, // "active", "completed", or "cancelled"
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -671,7 +673,37 @@ pub fn generate_workblock_visualization(
     app: &AppHandle,
     workblock_id: i64,
 ) -> Result<WorkblockVisualization> {
-    let intervals = get_intervals_by_workblock(app, workblock_id)?;
+    let workblock = get_workblock_by_id(app, workblock_id)?;
+    let mut intervals = get_intervals_by_workblock(app, workblock_id)?;
+    let is_cancelled = workblock.status == WorkblockStatus::Cancelled;
+    
+    // If cancelled, filter out intervals that start after cancellation time
+    // and identify the last interval to mark as cancelled
+    let cancellation_end_time = if is_cancelled {
+        workblock.end_time.as_ref().and_then(|et| {
+            DateTime::parse_from_rfc3339(et).ok()
+        })
+    } else {
+        None
+    };
+    
+    if let Some(cancel_time) = cancellation_end_time {
+        // Filter out intervals that start after cancellation
+        intervals.retain(|interval| {
+            if let Ok(start_time) = DateTime::parse_from_rfc3339(&interval.start_time) {
+                start_time <= cancel_time
+            } else {
+                true // Keep if we can't parse (shouldn't happen)
+            }
+        });
+    }
+    
+    // Find the last interval number to mark as cancelled (only for cancelled workblocks)
+    let last_interval_number = if is_cancelled && !intervals.is_empty() {
+        intervals.iter().map(|i| i.interval_number).max()
+    } else {
+        None
+    };
     
     // Generate timeline data
     let timeline_data: Vec<TimelineData> = intervals
@@ -685,23 +717,38 @@ pub fn generate_workblock_visualization(
                 15 // Default 15 minutes if not ended
             };
             
+            // Only mark as cancelled if this is the last interval and workblock is cancelled
+            let status = if is_cancelled && last_interval_number == Some(interval.interval_number) {
+                Some("cancelled".to_string())
+            } else {
+                None
+            };
+            
             TimelineData {
                 interval_number: interval.interval_number,
                 start_time: interval.start_time.clone(),
                 end_time: interval.end_time.clone(),
                 words: interval.words.clone(),
                 duration_minutes: duration,
+                workblock_status: status,
             }
         })
         .collect();
     
-    // Generate activity data (group by words)
+    // Generate activity data (group by words) - only from intervals that were actually used
     let mut activity_map: HashMap<String, i32> = HashMap::new();
     for interval in &intervals {
         if let Some(words) = &interval.words {
             let words_lower = words.to_lowercase().trim().to_string();
             if !words_lower.is_empty() {
-                *activity_map.entry(words_lower).or_insert(0) += 15; // Each interval is 15 minutes
+                let duration = if let Some(end_time) = &interval.end_time {
+                    let start = DateTime::parse_from_rfc3339(&interval.start_time).unwrap_or_default();
+                    let end = DateTime::parse_from_rfc3339(end_time).unwrap_or_default();
+                    (end - start).num_minutes() as i32
+                } else {
+                    15 // Default 15 minutes if not ended
+                };
+                *activity_map.entry(words_lower).or_insert(0) += duration;
             }
         }
     }
@@ -757,7 +804,35 @@ pub fn generate_daily_aggregate(app: &AppHandle, date: &str) -> Result<DailyAggr
     let mut word_freq_map: HashMap<String, i32> = HashMap::new();
     
     for workblock in &workblocks {
-        let intervals = get_intervals_by_workblock(app, workblock.id.unwrap())?;
+        let mut intervals = get_intervals_by_workblock(app, workblock.id.unwrap())?;
+        let is_cancelled = workblock.status == WorkblockStatus::Cancelled;
+        
+        // If cancelled, filter out intervals that start after cancellation time
+        let cancellation_end_time = if is_cancelled {
+            workblock.end_time.as_ref().and_then(|et| {
+                DateTime::parse_from_rfc3339(et).ok()
+            })
+        } else {
+            None
+        };
+        
+        if let Some(cancel_time) = cancellation_end_time {
+            // Filter out intervals that start after cancellation
+            intervals.retain(|interval| {
+                if let Ok(start_time) = DateTime::parse_from_rfc3339(&interval.start_time) {
+                    start_time <= cancel_time
+                } else {
+                    true // Keep if we can't parse (shouldn't happen)
+                }
+            });
+        }
+        
+        // Find the last interval number to mark as cancelled (only for cancelled workblocks)
+        let last_interval_number = if is_cancelled && !intervals.is_empty() {
+            intervals.iter().map(|i| i.interval_number).max()
+        } else {
+            None
+        };
         
         // Add to timeline
         for interval in &intervals {
@@ -769,6 +844,13 @@ pub fn generate_daily_aggregate(app: &AppHandle, date: &str) -> Result<DailyAggr
                 15
             };
             
+            // Only mark as cancelled if this is the last interval and workblock is cancelled
+            let status = if is_cancelled && last_interval_number == Some(interval.interval_number) {
+                Some("cancelled".to_string())
+            } else {
+                None
+            };
+            
             all_timeline_data.push(AggregateTimelineData {
                 workblock_id: workblock.id.unwrap(),
                 interval_number: interval.interval_number,
@@ -776,9 +858,10 @@ pub fn generate_daily_aggregate(app: &AppHandle, date: &str) -> Result<DailyAggr
                 end_time: interval.end_time.clone(),
                 words: interval.words.clone(),
                 duration_minutes: duration,
+                workblock_status: status,
             });
             
-            // Add to activity map
+            // Add to activity map - only count duration that was actually used
             if let Some(words) = &interval.words {
                 let words_lower = words.to_lowercase().trim().to_string();
                 if !words_lower.is_empty() {

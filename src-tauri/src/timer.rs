@@ -60,7 +60,9 @@ impl TimerManager {
         }
 
         // Calculate number of intervals
-        let total_intervals = duration_minutes / 15;
+        // TESTING: Calculate intervals based on 10-second intervals instead of 15-minute
+        // For testing: 1 interval per 10 seconds, so duration_minutes * 6 intervals per minute
+        let total_intervals = duration_minutes * 6; // TESTING: Changed from duration_minutes / 15
         
         // Initialize state
         state.workblock_id = Some(workblock_id);
@@ -85,10 +87,11 @@ impl TimerManager {
         let app_clone = self.app.clone();
         
         let handle = tokio::spawn(async move {
-            let mut interval_timer = interval(Duration::from_secs(15 * 60)); // 15 minutes
+            // TESTING: 10 seconds instead of 15 minutes
+            let mut interval_timer = interval(Duration::from_secs(10)); // TESTING: Changed from 15 * 60
             interval_timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
             
-            // Wait for first tick (15 minutes from now)
+            // Wait for first tick (10 seconds from now for testing)
             interval_timer.tick().await;
             
             let mut current_interval_num = 1;
@@ -128,7 +131,8 @@ impl TimerManager {
                     let state_for_auto_away = Arc::clone(&state_clone);
                     let app_for_auto_away = app_clone.clone();
                     tokio::spawn(async move {
-                        tokio::time::sleep(Duration::from_secs(10 * 60)).await;
+                        // TESTING: 5 seconds instead of 10 minutes
+                        tokio::time::sleep(Duration::from_secs(5)).await; // TESTING: Changed from 10 * 60
                         
                         let state = state_for_auto_away.lock().await;
                         if let Some(current_interval_id) = state.current_interval_id {
@@ -238,8 +242,8 @@ impl TimerManager {
         let state_clone = Arc::clone(&self.state);
         
         let handle = tokio::spawn(async move {
-            // Wait 10 minutes
-            tokio::time::sleep(Duration::from_secs(10 * 60)).await;
+            // TESTING: 5 seconds instead of 10 minutes
+            tokio::time::sleep(Duration::from_secs(5)).await; // TESTING: Changed from 10 * 60
             
             // Check if interval still exists and hasn't been recorded
             let state = state_clone.lock().await;
@@ -291,7 +295,7 @@ impl TimerManager {
         
         if let Some(start_time) = state.interval_start_time {
             let elapsed = (Local::now() - start_time).num_seconds();
-            let remaining = (15 * 60) - elapsed; // 15 minutes in seconds
+            let remaining = 10 - elapsed; // TESTING: 10 seconds (normally 15 * 60 = 900)
             Some(remaining.max(0))
         } else {
             None
@@ -322,7 +326,8 @@ impl TimerManager {
                     
                     // Calculate remaining intervals
                     let elapsed_intervals = current_interval.interval_number;
-                    let total_intervals = duration / 15;
+                    // TESTING: 10-second intervals (duration_minutes * 6 per minute)
+                    let total_intervals = duration * 6; // TESTING: Changed from duration / 15
                     let remaining_intervals = total_intervals - elapsed_intervals;
                     
                     if remaining_intervals > 0 {

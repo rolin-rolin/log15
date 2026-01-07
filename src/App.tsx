@@ -2,12 +2,11 @@ import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import PromptPage from "./pages/PromptPage";
+import WorkblockControl from "./components/WorkblockControl";
 import "./App.css";
 
 function App() {
     const [currentView, setCurrentView] = useState<string>("main");
-    const [greetMsg, setGreetMsg] = useState("");
-    const [name, setName] = useState("");
 
     useEffect(() => {
         // Check if we're in the prompt window (check URL hash)
@@ -69,36 +68,13 @@ function App() {
         }
     }, []);
 
-    async function greet() {
-        setGreetMsg(await invoke("greet", { name }));
-    }
-
     if (currentView === "prompt") {
         return <PromptPage />;
     }
 
     return (
         <main className="container">
-            <h1>Log15 - Workblock Tracker</h1>
-            <p>Welcome! This is the main application window.</p>
-            <p>Workblock UI coming soon...</p>
-
-            {/* Temporary test UI */}
-            <form
-                className="row"
-                onSubmit={(e) => {
-                    e.preventDefault();
-                    greet();
-                }}
-            >
-                <input
-                    id="greet-input"
-                    onChange={(e) => setName(e.currentTarget.value)}
-                    placeholder="Enter a name..."
-                />
-                <button type="submit">Greet</button>
-            </form>
-            <p>{greetMsg}</p>
+            <WorkblockControl />
         </main>
     );
 }

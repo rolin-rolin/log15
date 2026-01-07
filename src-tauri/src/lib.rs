@@ -6,7 +6,7 @@ pub mod window_manager;
 pub use tray::TrayManager;
 
 use db::{
-    init_db, create_workblock, get_active_workblock, cancel_workblock,
+    init_db, create_workblock, get_active_workblock, cancel_workblock, get_workblock_by_id,
     get_workblocks_by_date,
     add_interval, update_interval_words, get_intervals_by_workblock, get_current_interval,
     check_and_reset_daily, get_archived_day, get_today_date,
@@ -16,7 +16,7 @@ use timer::TimerManager;
 use window_manager::WindowManager;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tauri::{Manager, Emitter};
+use tauri::{Manager, Emitter, async_runtime};
 
 // Re-export types for frontend
 pub use db::{Workblock, Interval, DailyArchive, WorkblockStatus, IntervalStatus};
@@ -121,22 +121,50 @@ async fn submit_interval_words(
     app: tauri::AppHandle,
     interval_id: i64,
     words: String,
-) -> Result<Interval, String> {
+) -> Result<serde_json::Value, String> {
     // Cancel auto-away timer since user submitted words
     let timer_manager = app.state::<Arc<Mutex<TimerManager>>>();
     let timer = timer_manager.lock().await;
     timer.cancel_auto_away_timer().await;
     drop(timer);
     
-    // Hide prompt window
+    // Update interval with words
+    let interval = update_interval_words(&app, interval_id, words, IntervalStatus::Recorded)
+        .map_err(|e| e.to_string())?;
+    
+    // Check if this is the last interval
+    let workblock_id = interval.workblock_id;
+    let workblock = get_workblock_by_id(&app, workblock_id)
+        .map_err(|e| e.to_string())?;
+    
+    // TESTING: Calculate based on 10-second intervals (normally 15-minute intervals)
+    // For testing: 1 interval per 10 seconds, so duration_minutes * 6 intervals per minute
+    let total_intervals = workblock.duration_minutes.unwrap_or(60) * 6; // TESTING: Changed from / 15
+    // If this interval's number equals total_intervals, it's the last one
+    let is_last_interval = interval.interval_number >= total_intervals;
+    
     let window_manager = app.state::<Arc<Mutex<WindowManager>>>();
     let window_mgr = window_manager.lock().await;
-    window_mgr.hide_prompt_window().await.ok();
+    
+    if is_last_interval {
+        // Show summary ready view instead of hiding
+        window_mgr.show_summary_ready().await.map_err(|e| e.to_string())?;
+        
+        // Update tray state to SummaryReady
+        let tray_manager = app.state::<Arc<Mutex<TrayManager>>>();
+        let mut tray = tray_manager.lock().await;
+        tray.update_icon_state(crate::tray::TrayIconState::SummaryReady).await;
+        drop(tray);
+    } else {
+        // Hide prompt window normally
+        window_mgr.hide_prompt_window().await.ok();
+    }
     drop(window_mgr);
     
-    // Update interval with words
-    update_interval_words(&app, interval_id, words, IntervalStatus::Recorded)
-        .map_err(|e| e.to_string())
+    Ok(serde_json::json!({
+        "interval": interval,
+        "is_last_interval": is_last_interval
+    }))
 }
 
 // Window management commands
@@ -163,7 +191,20 @@ async fn show_prompt_window_cmd(
 async fn hide_prompt_window_cmd(app: tauri::AppHandle) -> Result<(), String> {
     let window_manager = app.state::<Arc<Mutex<WindowManager>>>();
     let window_mgr = window_manager.lock().await;
-    window_mgr.hide_prompt_window().await
+    
+    // Check if summary is showing - if so, update tray to Idle
+    let was_summary = window_mgr.is_summary_ready().await;
+    
+    window_mgr.hide_prompt_window().await?;
+    
+    // If summary was showing, update tray to Idle
+    if was_summary {
+        let tray_manager = app.state::<Arc<Mutex<TrayManager>>>();
+        let mut tray = tray_manager.lock().await;
+        tray.update_icon_state(crate::tray::TrayIconState::Idle).await;
+    }
+    
+    Ok(())
 }
 
 #[tauri::command]
@@ -270,15 +311,18 @@ pub fn run() {
             }
             
             // Restore active workblock if one exists (for app restart scenarios)
-            tokio::spawn(async move {
-                let timer = timer_manager.lock().await;
+            // Use Tauri's async runtime instead of tokio::spawn
+            let timer_clone = timer_manager.clone();
+            let tray_clone = tray_manager.clone();
+            async_runtime::spawn(async move {
+                let timer = timer_clone.lock().await;
                 if let Err(e) = timer.restore_active_workblock().await {
                     eprintln!("Failed to restore active workblock: {}", e);
                 }
                 drop(timer);
                 
                 // Refresh tray state after restoring workblock
-                let mut tray = tray_manager.lock().await;
+                let mut tray = tray_clone.lock().await;
                 tray.refresh_state().await;
             });
             
