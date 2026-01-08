@@ -8,8 +8,16 @@ interface TimelineChartProps {
 
 // Color palette for activities
 const COLORS = [
-    "#4a90e2", "#4caf50", "#ff9800", "#e91e63", "#9c27b0",
-    "#00bcd4", "#ffc107", "#795548", "#607d8b", "#f44336"
+    "#4a90e2",
+    "#4caf50",
+    "#ff9800",
+    "#e91e63",
+    "#9c27b0",
+    "#00bcd4",
+    "#ffc107",
+    "#795548",
+    "#607d8b",
+    "#f44336",
 ];
 
 export default function TimelineChart({ timelineData, title = "Timeline" }: TimelineChartProps) {
@@ -46,12 +54,14 @@ export default function TimelineChart({ timelineData, title = "Timeline" }: Time
     return (
         <div style={{ marginTop: "20px" }}>
             <h3 style={{ marginBottom: "15px", fontSize: "18px", fontWeight: 600 }}>{title}</h3>
-            <div style={{ 
-                display: "flex", 
-                flexDirection: "column", 
-                gap: "8px",
-                marginTop: "10px"
-            }}>
+            <div
+                style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "8px",
+                    marginTop: "10px",
+                }}
+            >
                 {coloredIntervals.map((interval, index) => {
                     const widthPercent = (interval.duration_minutes / totalMinutes) * 100;
                     const formattedTime = new Date(interval.start_time).toLocaleTimeString([], {
@@ -61,28 +71,32 @@ export default function TimelineChart({ timelineData, title = "Timeline" }: Time
 
                     return (
                         <div key={index} style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                            <div style={{ 
-                                minWidth: "100px", 
-                                fontSize: "12px", 
-                                color: "#666",
-                                textAlign: "right"
-                            }}>
+                            <div
+                                style={{
+                                    minWidth: "100px",
+                                    fontSize: "12px",
+                                    color: "#666",
+                                    textAlign: "right",
+                                }}
+                            >
                                 {formattedTime}
                             </div>
-                            <div style={{ 
-                                flex: 1, 
-                                height: "30px", 
-                                backgroundColor: interval.color,
-                                borderRadius: "4px",
-                                display: "flex",
-                                alignItems: "center",
-                                padding: "0 10px",
-                                color: "white",
-                                fontSize: "12px",
-                                fontWeight: 500,
-                                position: "relative",
-                                minWidth: `${Math.max(widthPercent, 5)}%`
-                            }}>
+                            <div
+                                style={{
+                                    flex: 1,
+                                    height: "30px",
+                                    backgroundColor: interval.color,
+                                    borderRadius: "4px",
+                                    display: "flex",
+                                    alignItems: "center",
+                                    padding: "0 10px",
+                                    color: "white",
+                                    fontSize: "12px",
+                                    fontWeight: 500,
+                                    position: "relative",
+                                    minWidth: `${Math.max(widthPercent, 5)}%`,
+                                }}
+                            >
                                 <span>{interval.words || "Pending"}</span>
                                 <span style={{ marginLeft: "auto", fontSize: "11px" }}>
                                     {interval.duration_minutes}m
@@ -92,12 +106,14 @@ export default function TimelineChart({ timelineData, title = "Timeline" }: Time
                     );
                 })}
             </div>
-            <div style={{ 
-                marginTop: "15px", 
-                fontSize: "12px", 
-                color: "#666",
-                textAlign: "right"
-            }}>
+            <div
+                style={{
+                    marginTop: "15px",
+                    fontSize: "12px",
+                    color: "#666",
+                    textAlign: "right",
+                }}
+            >
                 Total: {totalMinutes} minutes
             </div>
         </div>

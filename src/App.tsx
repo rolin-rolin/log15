@@ -138,8 +138,8 @@ function App() {
 
     return (
         <main className="container">
-            <WorkblockControl 
-                onNavigateToSummary={() => setCurrentView("summary")} 
+            <WorkblockControl
+                onNavigateToSummary={() => setCurrentView("summary")}
                 onNavigateToArchive={() => setCurrentView("archive")}
             />
         </main>

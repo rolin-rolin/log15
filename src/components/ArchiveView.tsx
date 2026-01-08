@@ -28,11 +28,11 @@ export default function ArchiveView({ onBack }: { onBack?: () => void }) {
     const formatDate = (dateStr: string) => {
         try {
             const date = new Date(dateStr + "T00:00:00");
-            return date.toLocaleDateString("en-US", { 
+            return date.toLocaleDateString("en-US", {
                 weekday: "short",
-                year: "numeric", 
-                month: "short", 
-                day: "numeric" 
+                year: "numeric",
+                month: "short",
+                day: "numeric",
             });
         } catch {
             return dateStr;
@@ -40,12 +40,7 @@ export default function ArchiveView({ onBack }: { onBack?: () => void }) {
     };
 
     if (selectedDate) {
-        return (
-            <SummaryView 
-                date={selectedDate} 
-                onBack={() => setSelectedDate(null)}
-            />
-        );
+        return <SummaryView date={selectedDate} onBack={() => setSelectedDate(null)} />;
     }
 
     if (loading) {
@@ -70,25 +65,21 @@ export default function ArchiveView({ onBack }: { onBack?: () => void }) {
             {archivedDates.length === 0 ? (
                 <div className="archive-empty">
                     <p>No archived data available yet.</p>
-                    <p className="archive-empty-subtitle">
-                        Archived data appears here after day transitions.
-                    </p>
+                    <p className="archive-empty-subtitle">Archived data appears here after day transitions.</p>
                 </div>
             ) : (
                 <div className="archive-list">
                     {archivedDates.map((archive) => (
-                        <div
-                            key={archive.date}
-                            className="archive-item"
-                            onClick={() => setSelectedDate(archive.date)}
-                        >
-                            <div className="archive-item-date">
-                                {formatDate(archive.date)}
-                            </div>
+                        <div key={archive.date} className="archive-item" onClick={() => setSelectedDate(archive.date)}>
+                            <div className="archive-item-date">{formatDate(archive.date)}</div>
                             <div className="archive-item-stats">
-                                <span>{archive.total_workblocks} workblock{archive.total_workblocks !== 1 ? 's' : ''}</span>
+                                <span>
+                                    {archive.total_workblocks} workblock{archive.total_workblocks !== 1 ? "s" : ""}
+                                </span>
                                 <span>•</span>
-                                <span>{Math.floor(archive.total_minutes / 60)}h {archive.total_minutes % 60}m</span>
+                                <span>
+                                    {Math.floor(archive.total_minutes / 60)}h {archive.total_minutes % 60}m
+                                </span>
                             </div>
                             <div className="archive-item-arrow">→</div>
                         </div>

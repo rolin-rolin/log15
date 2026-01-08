@@ -7,8 +7,16 @@ interface ActivityChartProps {
 }
 
 const COLORS = [
-    "#4a90e2", "#4caf50", "#ff9800", "#e91e63", "#9c27b0",
-    "#00bcd4", "#ffc107", "#795548", "#607d8b", "#f44336"
+    "#4a90e2",
+    "#4caf50",
+    "#ff9800",
+    "#e91e63",
+    "#9c27b0",
+    "#00bcd4",
+    "#ffc107",
+    "#795548",
+    "#607d8b",
+    "#f44336",
 ];
 
 export default function ActivityChart({ activityData, title = "Activity Breakdown" }: ActivityChartProps) {
@@ -33,15 +41,15 @@ export default function ActivityChart({ activityData, title = "Activity Breakdow
             <ResponsiveContainer width="100%" height={300}>
                 <BarChart data={chartData} margin={{ top: 20, right: 30, left: 20, bottom: 60 }}>
                     <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis 
-                        dataKey="name" 
-                        angle={-45} 
-                        textAnchor="end" 
+                    <XAxis
+                        dataKey="name"
+                        angle={-45}
+                        textAnchor="end"
                         height={80}
                         interval={0}
                         style={{ fontSize: "12px" }}
                     />
-                    <YAxis 
+                    <YAxis
                         label={{ value: "Minutes", angle: -90, position: "insideLeft" }}
                         style={{ fontSize: "12px" }}
                     />
@@ -63,24 +71,26 @@ export default function ActivityChart({ activityData, title = "Activity Breakdow
             </ResponsiveContainer>
             <div style={{ marginTop: "15px", display: "flex", flexWrap: "wrap", gap: "10px" }}>
                 {chartData.map((activity, index) => (
-                    <div 
-                        key={index} 
-                        style={{ 
-                            display: "flex", 
-                            alignItems: "center", 
+                    <div
+                        key={index}
+                        style={{
+                            display: "flex",
+                            alignItems: "center",
                             gap: "5px",
-                            fontSize: "12px"
+                            fontSize: "12px",
                         }}
                     >
-                        <div 
-                            style={{ 
-                                width: "12px", 
-                                height: "12px", 
+                        <div
+                            style={{
+                                width: "12px",
+                                height: "12px",
                                 backgroundColor: activity.color,
-                                borderRadius: "2px"
-                            }} 
+                                borderRadius: "2px",
+                            }}
                         />
-                        <span>{activity.name}: {activity.minutes} min ({activity.percentage.toFixed(1)}%)</span>
+                        <span>
+                            {activity.name}: {activity.minutes} min ({activity.percentage.toFixed(1)}%)
+                        </span>
                     </div>
                 ))}
             </div>

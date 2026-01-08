@@ -1,11 +1,11 @@
 import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import type { 
-    Workblock, 
-    DailyVisualizationData, 
+import type {
+    Workblock,
+    DailyVisualizationData,
     WorkblockVisualization,
     DailyAggregate,
-    DailyArchive
+    DailyArchive,
 } from "../types/workblock";
 import TimelineChart from "./TimelineChart";
 import ActivityChart from "./ActivityChart";
@@ -35,36 +35,38 @@ export default function SummaryView({ onBack, date }: SummaryViewProps) {
         setError(null);
 
         try {
-            const targetDate = date || await invoke<string>("get_today_date_cmd");
-            
+            const targetDate = date || (await invoke<string>("get_today_date_cmd"));
+
             // Check if this is an archived date
             const archive = await invoke<DailyArchive | null>("get_archived_day_cmd", { date: targetDate });
-            
+
             if (archive && archive.visualization_data) {
                 // Load archived data
                 setIsArchived(true);
                 setArchivedData(archive);
                 const parsed = JSON.parse(archive.visualization_data) as DailyVisualizationData;
                 setVizData(parsed);
-                
+
                 // Workblocks are already in the visualization data
-                setWorkblocks(parsed.workblocks.map(wb => ({
-                    id: wb.id,
-                    date: targetDate,
-                    status: "completed" as const,
-                    is_archived: true,
-                })) as Workblock[]);
+                setWorkblocks(
+                    parsed.workblocks.map((wb) => ({
+                        id: wb.id,
+                        date: targetDate,
+                        status: "completed" as const,
+                        is_archived: true,
+                    })) as Workblock[]
+                );
             } else {
                 // Load current day data
                 setIsArchived(false);
                 const vizDataJson = await invoke<string>("get_daily_visualization_data_cmd", { date: targetDate });
                 const parsed = JSON.parse(vizDataJson) as DailyVisualizationData;
                 setVizData(parsed);
-                
+
                 // Get workblocks for the date
                 const wbs = await invoke<Workblock[]>("get_workblocks_by_date_cmd", { date: targetDate });
-                setWorkblocks(wbs.filter(wb => wb.status !== "cancelled"));
-                
+                setWorkblocks(wbs.filter((wb) => wb.status !== "cancelled"));
+
                 // Set active tab to first workblock if aggregate is empty
                 if (parsed.workblocks.length > 0 && parsed.daily_aggregate.total_workblocks === 0) {
                     setActiveTab(`workblock-${parsed.workblocks[0].id}`);
@@ -81,11 +83,11 @@ export default function SummaryView({ onBack, date }: SummaryViewProps) {
     const formatDate = (dateStr: string) => {
         try {
             const date = new Date(dateStr + "T00:00:00");
-            return date.toLocaleDateString("en-US", { 
+            return date.toLocaleDateString("en-US", {
                 weekday: "long",
-                year: "numeric", 
-                month: "long", 
-                day: "numeric" 
+                year: "numeric",
+                month: "long",
+                day: "numeric",
             });
         } catch {
             return dateStr;
@@ -104,7 +106,7 @@ export default function SummaryView({ onBack, date }: SummaryViewProps) {
         return (
             <div style={{ padding: "40px", textAlign: "center", color: "#dc3545" }}>
                 <p>Error: {error}</p>
-                <button 
+                <button
                     onClick={loadSummaryData}
                     style={{
                         marginTop: "20px",
@@ -126,9 +128,7 @@ export default function SummaryView({ onBack, date }: SummaryViewProps) {
         return (
             <div style={{ padding: "40px", textAlign: "center", color: "#666" }}>
                 <p>No summary data available</p>
-                <p style={{ fontSize: "14px", marginTop: "10px" }}>
-                    Start a workblock to generate summary data.
-                </p>
+                <p style={{ fontSize: "14px", marginTop: "10px" }}>Start a workblock to generate summary data.</p>
             </div>
         );
     }
@@ -146,9 +146,7 @@ export default function SummaryView({ onBack, date }: SummaryViewProps) {
                     </button>
                 )}
                 <h1>Summary{displayDate ? ` - ${formatDate(displayDate)}` : ""}</h1>
-                {isArchived && (
-                    <span className="archived-badge">Archived</span>
-                )}
+                {isArchived && <span className="archived-badge">Archived</span>}
             </div>
 
             {hasAggregate && (
@@ -196,15 +194,12 @@ export default function SummaryView({ onBack, date }: SummaryViewProps) {
             <div className="summary-content">
                 {activeTab === "aggregate" && hasAggregate ? (
                     <div>
-                        <TimelineChart 
-                            timelineData={vizData.daily_aggregate.timeline_data}
-                            title="Daily Timeline"
-                        />
-                        <ActivityChart 
+                        <TimelineChart timelineData={vizData.daily_aggregate.timeline_data} title="Daily Timeline" />
+                        <ActivityChart
                             activityData={vizData.daily_aggregate.activity_data}
                             title="Daily Activity Breakdown"
                         />
-                        <WordFrequencyChart 
+                        <WordFrequencyChart
                             wordFrequency={vizData.daily_aggregate.word_frequency}
                             title="Daily Word Frequency"
                         />
@@ -213,7 +208,7 @@ export default function SummaryView({ onBack, date }: SummaryViewProps) {
                     (() => {
                         const workblockId = parseInt(activeTab.replace("workblock-", ""));
                         const workblock = vizData.workblocks.find((wb) => wb.id === workblockId);
-                        
+
                         if (!workblock) {
                             return (
                                 <div style={{ padding: "20px", textAlign: "center", color: "#666" }}>
@@ -224,15 +219,15 @@ export default function SummaryView({ onBack, date }: SummaryViewProps) {
 
                         return (
                             <div>
-                                <TimelineChart 
+                                <TimelineChart
                                     timelineData={workblock.timeline_data}
                                     title={`Workblock #${workblock.id} Timeline`}
                                 />
-                                <ActivityChart 
+                                <ActivityChart
                                     activityData={workblock.activity_data}
                                     title={`Workblock #${workblock.id} Activity Breakdown`}
                                 />
-                                <WordFrequencyChart 
+                                <WordFrequencyChart
                                     wordFrequency={workblock.word_frequency}
                                     title={`Workblock #${workblock.id} Word Frequency`}
                                 />
