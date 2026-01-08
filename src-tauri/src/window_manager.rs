@@ -43,13 +43,15 @@ impl WindowManager {
         *self.current_interval_id.lock().await = Some(interval_id);
 
         println!("[WINDOW_MGR] Creating new prompt window");
-        // Create the prompt window
+        // Create the prompt window with intervalId in URL query parameter
         // For now, we'll use a URL that points to a route in the main app
         // In production, you might want a separate HTML file
+        let url_with_interval = format!("index.html#/prompt?intervalId={}", interval_id);
+        println!("[WINDOW_MGR] Creating window with URL: {}", url_with_interval);
         let window = WebviewWindowBuilder::new(
             &self.app,
             "prompt",
-            WebviewUrl::App("index.html#/prompt".into()),
+            WebviewUrl::App(url_with_interval.into()),
         )
         .title("Log15 - What did you do?")
         .inner_size(300.0, 180.0) // Increased height for summary view
@@ -122,15 +124,14 @@ impl WindowManager {
             println!("[WINDOW_MGR] Window size: {:?}", size);
         }
 
-        // Send interval ID to frontend BEFORE storing (so event is ready when window loads)
-        println!("[WINDOW_MGR] Emitting prompt-interval-id event with interval_id={}", interval_id);
-        window
-            .emit("prompt-interval-id", interval_id)
-            .map_err(|e| {
-                eprintln!("[WINDOW_MGR] Failed to emit interval ID: {}", e);
-                format!("Failed to emit interval ID: {}", e)
-            })?;
-        println!("[WINDOW_MGR] Event emitted successfully");
+        // Note: intervalId is now passed in URL, so we don't need to emit the event
+        // Keeping event emission as fallback for now, but URL should be primary method
+        println!("[WINDOW_MGR] Window created with intervalId={} in URL, emitting event as fallback", interval_id);
+        let emit_result = window.emit("prompt-interval-id", interval_id);
+        match emit_result {
+            Ok(_) => println!("[WINDOW_MGR] Event emitted successfully (fallback)"),
+            Err(e) => eprintln!("[WINDOW_MGR] Failed to emit interval ID (fallback): {}", e),
+        }
 
         // Store window in state AFTER everything is set up
         let mut prompt = self.prompt_window.lock().await;

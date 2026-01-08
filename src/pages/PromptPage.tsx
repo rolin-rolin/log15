@@ -5,14 +5,23 @@ import PromptWindow from "../components/PromptWindow";
 import "../components/PromptWindow.css";
 
 export default function PromptPage() {
-    const [intervalId, setIntervalId] = useState<number | null>(null);
+    // Initialize intervalId synchronously from URL to avoid loading screen flash
+    const getInitialIntervalId = (): number | null => {
+        const hash = window.location.hash;
+        const hashMatch = hash.match(/[?&]intervalId=(\d+)/);
+        if (hashMatch) {
+            const parsedId = parseInt(hashMatch[1], 10);
+            return isNaN(parsedId) ? null : parsedId;
+        }
+        return null;
+    };
+
+    const [intervalId, setIntervalId] = useState<number | null>(getInitialIntervalId);
 
     useEffect(() => {
         console.log("[PROMPT_PAGE] Component mounted! Setting up event listeners");
-        console.log("[PROMPT_PAGE] Current URL:", window.location.href);
-        console.log("[PROMPT_PAGE] Current hash:", window.location.hash);
 
-        // Listen for interval ID from backend
+        // Listen for interval ID from backend (fallback - URL should have it already)
         const setupListeners = async () => {
             const unlisten = await listen<number>("prompt-interval-id", (event) => {
                 console.log("[PROMPT_PAGE] Received prompt-interval-id event:", event.payload);

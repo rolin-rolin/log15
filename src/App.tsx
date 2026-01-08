@@ -3,6 +3,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import PromptPage from "./pages/PromptPage";
 import WorkblockControl from "./components/WorkblockControl";
+import SummaryView from "./components/SummaryView";
+import ArchiveView from "./components/ArchiveView";
 import "./App.css";
 
 function App() {
@@ -84,8 +86,7 @@ function App() {
             });
 
             unlistenSummary = listen("tray-view-summary", () => {
-                setCurrentView("main");
-                // TODO: Navigate to summary view
+                setCurrentView("summary");
             });
 
             unlistenLastWords = listen("tray-view-last-words", () => {
@@ -119,9 +120,28 @@ function App() {
         return <PromptPage />;
     }
 
+    if (currentView === "summary") {
+        return (
+            <main className="container">
+                <SummaryView onBack={() => setCurrentView("main")} />
+            </main>
+        );
+    }
+
+    if (currentView === "archive") {
+        return (
+            <main className="container">
+                <ArchiveView onBack={() => setCurrentView("main")} />
+            </main>
+        );
+    }
+
     return (
         <main className="container">
-            <WorkblockControl />
+            <WorkblockControl 
+                onNavigateToSummary={() => setCurrentView("summary")} 
+                onNavigateToArchive={() => setCurrentView("archive")}
+            />
         </main>
     );
 }

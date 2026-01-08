@@ -1,0 +1,143 @@
+.archive-view {
+    padding: 20px;
+    max-width: 800px;
+    margin: 0 auto;
+}
+
+.archive-header {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    margin-bottom: 30px;
+}
+
+.archive-header h1 {
+    margin: 0;
+    font-size: 28px;
+    font-weight: 600;
+    color: #333;
+}
+
+.back-button {
+    padding: 8px 16px;
+    background-color: #f0f0f0;
+    color: #333;
+    border: 1px solid #ddd;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 14px;
+    transition: background-color 0.2s;
+}
+
+.back-button:hover {
+    background-color: #e0e0e0;
+}
+
+.archive-empty {
+    text-align: center;
+    padding: 60px 20px;
+    color: #666;
+}
+
+.archive-empty p {
+    margin: 10px 0;
+    font-size: 16px;
+}
+
+.archive-empty-subtitle {
+    font-size: 14px;
+    color: #999;
+}
+
+.archive-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.archive-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 20px;
+    background-color: white;
+    border: 1px solid #e0e0e0;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.archive-item:hover {
+    border-color: #4a90e2;
+    box-shadow: 0 2px 8px rgba(74, 144, 226, 0.1);
+    transform: translateY(-2px);
+}
+
+.archive-item-date {
+    font-size: 16px;
+    font-weight: 600;
+    color: #333;
+}
+
+.archive-item-stats {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 14px;
+    color: #666;
+}
+
+.archive-item-arrow {
+    font-size: 20px;
+    color: #4a90e2;
+}
+
+@media (prefers-color-scheme: dark) {
+    .archive-view {
+        color: #f6f6f6;
+    }
+
+    .archive-header h1 {
+        color: #f6f6f6;
+    }
+
+    .back-button {
+        background-color: #2f2f2f;
+        color: #f6f6f6;
+        border-color: #444;
+    }
+
+    .back-button:hover {
+        background-color: #3f3f3f;
+    }
+
+    .archive-empty {
+        color: #aaa;
+    }
+
+    .archive-empty-subtitle {
+        color: #888;
+    }
+
+    .archive-item {
+        background-color: #1f1f1f;
+        border-color: #444;
+    }
+
+    .archive-item:hover {
+        border-color: #24c8db;
+        box-shadow: 0 2px 8px rgba(36, 200, 219, 0.1);
+    }
+
+    .archive-item-date {
+        color: #f6f6f6;
+    }
+
+    .archive-item-stats {
+        color: #aaa;
+    }
+
+    .archive-item-arrow {
+        color: #24c8db;
+    }
+}

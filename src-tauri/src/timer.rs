@@ -171,8 +171,8 @@ impl TimerManager {
         Ok(())
     }
 
-    /// Stop the current workblock
-    pub async fn stop_workblock(&self, workblock_id: i64) -> Result<(), String> {
+    /// Complete the current workblock (when it naturally finishes)
+    pub async fn complete_workblock(&self, workblock_id: i64) -> Result<(), String> {
         let mut state = self.state.lock().await;
         
         if state.workblock_id != Some(workblock_id) {
@@ -197,6 +197,41 @@ impl TimerManager {
             .map_err(|e| format!("Failed to complete workblock: {}", e))?;
         
         // Emit workblock-complete event
+        let _ = self.app.emit("workblock-complete", workblock_id);
+        
+        // Reset state
+        let mut state = self.state.lock().await;
+        *state = TimerState::default();
+        
+        Ok(())
+    }
+
+    /// Cancel the current workblock (when user clicks cancel)
+    pub async fn cancel_workblock(&self, workblock_id: i64) -> Result<(), String> {
+        let mut state = self.state.lock().await;
+        
+        if state.workblock_id != Some(workblock_id) {
+            return Err("Workblock ID mismatch".to_string());
+        }
+        
+        state.is_running = false;
+        drop(state);
+        
+        // Cancel interval timer
+        if let Some(handle) = self.interval_handle.lock().await.take() {
+            handle.abort();
+        }
+        
+        // Cancel auto-away timer
+        if let Some(handle) = self.auto_away_handle.lock().await.take() {
+            handle.abort();
+        }
+        
+        // Cancel the workblock (sets status to cancelled)
+        crate::db::cancel_workblock(&self.app, workblock_id)
+            .map_err(|e| format!("Failed to cancel workblock: {}", e))?;
+        
+        // Emit workblock-complete event (frontend can check status to see if cancelled)
         let _ = self.app.emit("workblock-complete", workblock_id);
         
         // Reset state

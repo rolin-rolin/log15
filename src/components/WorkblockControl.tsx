@@ -3,7 +3,12 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type { Workblock, TimerState } from "../types/workblock";
 
-export default function WorkblockControl() {
+interface WorkblockControlProps {
+    onNavigateToSummary?: () => void;
+    onNavigateToArchive?: () => void;
+}
+
+export default function WorkblockControl({ onNavigateToSummary, onNavigateToArchive }: WorkblockControlProps) {
     const [activeWorkblock, setActiveWorkblock] = useState<Workblock | null>(null);
     const [timerState, setTimerState] = useState<TimerState | null>(null);
     const [duration, setDuration] = useState<number>(60); // Default 60 minutes
@@ -79,32 +84,6 @@ export default function WorkblockControl() {
         }
     };
 
-    const handleStopWorkblock = async () => {
-        if (!activeWorkblock?.id) return;
-
-        setLoading(true);
-        try {
-            // Hide prompt window if it's open
-            try {
-                await invoke("hide_prompt_window_cmd");
-            } catch (e) {
-                // Ignore errors - window might not be open
-            }
-
-            await invoke("stop_workblock", {
-                workblockId: activeWorkblock.id,
-            });
-            setActiveWorkblock(null);
-            setTimerState(null);
-            setTimeRemaining(null);
-        } catch (error) {
-            console.error("Failed to stop workblock:", error);
-            alert(`Failed to stop workblock: ${error}`);
-        } finally {
-            setLoading(false);
-        }
-    };
-
     const handleCancelWorkblock = async () => {
         if (!activeWorkblock?.id) return;
 
@@ -152,7 +131,52 @@ export default function WorkblockControl() {
 
     return (
         <div style={{ padding: "20px", maxWidth: "600px", margin: "0 auto" }}>
-            <h1>Log15 - Workblock Tracker</h1>
+            <div
+                style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    marginBottom: "20px",
+                    flexWrap: "wrap",
+                    gap: "10px",
+                }}
+            >
+                <h1 style={{ margin: 0 }}>Log15 - Workblock Tracker</h1>
+                <div style={{ display: "flex", gap: "10px" }}>
+                    {onNavigateToSummary && (
+                        <button
+                            onClick={onNavigateToSummary}
+                            style={{
+                                padding: "8px 16px",
+                                backgroundColor: "#4a90e2",
+                                color: "white",
+                                border: "none",
+                                borderRadius: "5px",
+                                cursor: "pointer",
+                                fontSize: "14px",
+                            }}
+                        >
+                            View Summary
+                        </button>
+                    )}
+                    {onNavigateToArchive && (
+                        <button
+                            onClick={onNavigateToArchive}
+                            style={{
+                                padding: "8px 16px",
+                                backgroundColor: "#6c757d",
+                                color: "white",
+                                border: "none",
+                                borderRadius: "5px",
+                                cursor: "pointer",
+                                fontSize: "14px",
+                            }}
+                        >
+                            Archive
+                        </button>
+                    )}
+                </div>
+            </div>
 
             {activeWorkblock ? (
                 <div
@@ -185,20 +209,6 @@ export default function WorkblockControl() {
                     )}
 
                     <div style={{ marginTop: "20px", display: "flex", gap: "10px" }}>
-                        <button
-                            onClick={handleStopWorkblock}
-                            disabled={loading}
-                            style={{
-                                padding: "10px 20px",
-                                backgroundColor: "#4a90e2",
-                                color: "white",
-                                border: "none",
-                                borderRadius: "5px",
-                                cursor: loading ? "not-allowed" : "pointer",
-                            }}
-                        >
-                            Stop Workblock
-                        </button>
                         <button
                             onClick={handleCancelWorkblock}
                             disabled={loading}

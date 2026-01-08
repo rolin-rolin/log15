@@ -580,6 +580,34 @@ pub fn archive_daily_data(app: &AppHandle, date: &str) -> Result<DailyArchive> {
     })
 }
 
+/// Get all archived dates
+pub fn get_all_archived_dates(app: &AppHandle) -> Result<Vec<DailyArchive>> {
+    let conn = get_db_connection(app)?;
+    let mut stmt = conn.prepare(
+        "SELECT id, date, total_workblocks, total_minutes, visualization_data, archived_at 
+         FROM daily_archives 
+         ORDER BY date DESC"
+    )?;
+    
+    let archive_iter = stmt.query_map([], |row| {
+        Ok(DailyArchive {
+            id: row.get(0)?,
+            date: row.get(1)?,
+            total_workblocks: row.get(2)?,
+            total_minutes: row.get(3)?,
+            visualization_data: row.get(4)?,
+            archived_at: row.get(5)?,
+        })
+    })?;
+    
+    let mut archives = Vec::new();
+    for archive in archive_iter {
+        archives.push(archive?);
+    }
+    
+    Ok(archives)
+}
+
 /// Get archived day data
 pub fn get_archived_day(app: &AppHandle, date: &str) -> Result<Option<DailyArchive>> {
     let conn = get_db_connection(app)?;

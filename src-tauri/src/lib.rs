@@ -9,7 +9,7 @@ use db::{
     init_db, create_workblock, get_active_workblock, cancel_workblock, get_workblock_by_id,
     get_workblocks_by_date,
     add_interval, update_interval_words, get_intervals_by_workblock, get_current_interval,
-    check_and_reset_daily, get_archived_day, get_today_date,
+    check_and_reset_daily, get_archived_day, get_all_archived_dates, get_today_date,
     generate_workblock_visualization, generate_daily_aggregate, generate_daily_visualization_data,
 };
 use timer::TimerManager;
@@ -65,14 +65,10 @@ async fn start_workblock(
 }
 
 #[tauri::command]
-async fn stop_workblock(
-    app: tauri::AppHandle,
-    workblock_id: i64,
-) -> Result<Workblock, String> {
-    // Get the workblock first (before it's completed)
-    let workblock = get_active_workblock(&app)
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| "Workblock not found".to_string())?;
+async fn cancel_workblock_cmd(app: tauri::AppHandle, workblock_id: i64) -> Result<Workblock, String> {
+    // Get the current interval before cancelling (to remember which interval was active)
+    let current_interval = get_current_interval(&app, workblock_id)
+        .map_err(|e| e.to_string())?;
     
     // Hide prompt window if it's open
     let window_manager = app.state::<Arc<Mutex<WindowManager>>>();
@@ -80,30 +76,16 @@ async fn stop_workblock(
     window_mgr.hide_prompt_window().await.ok();
     drop(window_mgr);
     
-    // Get timer manager and stop the timer
+    // Get timer manager and cancel the timer
     let timer_manager = app.state::<Arc<Mutex<TimerManager>>>();
     let timer = timer_manager.lock().await;
     
-    // Stop the timer (this will also complete the workblock)
-    timer.stop_workblock(workblock_id).await?;
+    // Cancel the timer (this will also cancel the workblock)
+    timer.cancel_workblock(workblock_id).await?;
     
-    // Get the completed workblock
-    get_workblocks_by_date(&app, &workblock.date)
-        .map_err(|e| e.to_string())?
-        .into_iter()
-        .find(|wb| wb.id == Some(workblock_id))
-        .ok_or_else(|| "Completed workblock not found".to_string())
-}
-
-#[tauri::command]
-async fn cancel_workblock_cmd(app: tauri::AppHandle, workblock_id: i64) -> Result<Workblock, String> {
-    // Hide prompt window if it's open
-    let window_manager = app.state::<Arc<Mutex<WindowManager>>>();
-    let window_mgr = window_manager.lock().await;
-    window_mgr.hide_prompt_window().await.ok();
-    drop(window_mgr);
-    
-    cancel_workblock(&app, workblock_id).map_err(|e| e.to_string())
+    // Get the cancelled workblock
+    get_workblock_by_id(&app, workblock_id)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -172,7 +154,7 @@ async fn submit_interval_words(
         // (Timer loop intentionally does not complete the workblock on the last tick.)
         let timer_manager = app.state::<Arc<Mutex<TimerManager>>>();
         let timer = timer_manager.lock().await;
-        timer.stop_workblock(workblock_id).await.ok();
+        timer.complete_workblock(workblock_id).await.ok();
     } else {
         // Hide prompt window normally
         window_mgr.hide_prompt_window().await.ok();
@@ -281,6 +263,11 @@ fn get_today_date_cmd() -> String {
 #[tauri::command]
 fn get_archived_day_cmd(app: tauri::AppHandle, date: String) -> Result<Option<DailyArchive>, String> {
     get_archived_day(&app, &date).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn get_all_archived_dates_cmd(app: tauri::AppHandle) -> Result<Vec<DailyArchive>, String> {
+    get_all_archived_dates(&app).map_err(|e| e.to_string())
 }
 
 // Visualization commands
@@ -404,7 +391,6 @@ pub fn run() {
             greet,
             init_database,
             start_workblock,
-            stop_workblock,
             cancel_workblock_cmd,
             get_active_workblock_cmd,
             get_workblocks_by_date_cmd,
@@ -417,6 +403,7 @@ pub fn run() {
             check_and_reset_daily_cmd,
             get_today_date_cmd,
             get_archived_day_cmd,
+            get_all_archived_dates_cmd,
             get_workblock_visualization,
             get_daily_aggregate_cmd,
             get_daily_visualization_data_cmd,
