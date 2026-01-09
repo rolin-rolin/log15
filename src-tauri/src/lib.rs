@@ -66,9 +66,18 @@ async fn start_workblock(
 
 #[tauri::command]
 async fn cancel_workblock_cmd(app: tauri::AppHandle, workblock_id: i64) -> Result<Workblock, String> {
+    // Verify workblock exists and is active
+    let workblock = get_active_workblock(&app)
+        .map_err(|e| format!("Failed to get active workblock: {}", e))?
+        .ok_or_else(|| "No active workblock found".to_string())?;
+    
+    if workblock.id != Some(workblock_id) {
+        return Err(format!("Workblock ID mismatch: expected {}, got {:?}", workblock_id, workblock.id));
+    }
+    
     // Get the current interval before cancelling (to remember which interval was active)
-    let current_interval = get_current_interval(&app, workblock_id)
-        .map_err(|e| e.to_string())?;
+    // This is optional - if there's no current interval, that's fine
+    let _current_interval = get_current_interval(&app, workblock_id).ok().flatten();
     
     // Hide prompt window if it's open
     let window_manager = app.state::<Arc<Mutex<WindowManager>>>();
@@ -81,11 +90,17 @@ async fn cancel_workblock_cmd(app: tauri::AppHandle, workblock_id: i64) -> Resul
     let timer = timer_manager.lock().await;
     
     // Cancel the timer (this will also cancel the workblock)
-    timer.cancel_workblock(workblock_id).await?;
+    timer.cancel_workblock(workblock_id).await.map_err(|e| {
+        eprintln!("[CANCEL] Error from timer.cancel_workblock: {}", e);
+        e
+    })?;
+    drop(timer);
     
     // Get the cancelled workblock
-    get_workblock_by_id(&app, workblock_id)
-        .map_err(|e| e.to_string())
+    let cancelled = get_workblock_by_id(&app, workblock_id)
+        .map_err(|e| format!("Failed to get cancelled workblock: {}", e))?;
+    
+    Ok(cancelled)
 }
 
 #[tauri::command]

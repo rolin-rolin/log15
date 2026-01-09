@@ -6,7 +6,7 @@ use crate::db::{
 };
 use crate::tray::{TrayIconState, TrayManager};
 use crate::window_manager::WindowManager;
-use chrono::{DateTime, Local};
+use chrono::{DateTime, Local, Utc};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager};
@@ -210,26 +210,35 @@ impl TimerManager {
     pub async fn cancel_workblock(&self, workblock_id: i64) -> Result<(), String> {
         let mut state = self.state.lock().await;
         
+        // Check if workblock ID matches, but don't fail if it doesn't - just log it
+        // This allows cancelling even if timer state is out of sync
         if state.workblock_id != Some(workblock_id) {
-            return Err("Workblock ID mismatch".to_string());
+            println!("[TIMER] Warning: Workblock ID mismatch in timer state. Timer state has {:?}, cancelling workblock_id={}. Proceeding anyway.", state.workblock_id, workblock_id);
         }
         
         state.is_running = false;
         drop(state);
         
         // Cancel interval timer
-        if let Some(handle) = self.interval_handle.lock().await.take() {
+        let interval_handle_opt = self.interval_handle.lock().await.take();
+        if let Some(handle) = interval_handle_opt {
             handle.abort();
+            println!("[TIMER] Interval timer aborted");
         }
         
         // Cancel auto-away timer
-        if let Some(handle) = self.auto_away_handle.lock().await.take() {
+        let auto_away_handle_opt = self.auto_away_handle.lock().await.take();
+        if let Some(handle) = auto_away_handle_opt {
             handle.abort();
+            println!("[TIMER] Auto-away timer aborted");
         }
         
         // Cancel the workblock (sets status to cancelled)
         crate::db::cancel_workblock(&self.app, workblock_id)
-            .map_err(|e| format!("Failed to cancel workblock: {}", e))?;
+            .map_err(|e| {
+                eprintln!("[TIMER] Error cancelling workblock in database: {}", e);
+                format!("Failed to cancel workblock: {}", e)
+            })?;
         
         // Emit workblock-complete event (frontend can check status to see if cancelled)
         let _ = self.app.emit("workblock-complete", workblock_id);

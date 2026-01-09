@@ -85,9 +85,7 @@ export default function WorkblockControl({ onNavigateToSummary, onNavigateToArch
     };
 
     const handleCancelWorkblock = async () => {
-        if (!activeWorkblock?.id) return;
-
-        if (!confirm("Are you sure you want to cancel this workblock?")) {
+        if (!activeWorkblock?.id) {
             return;
         }
 
@@ -103,9 +101,10 @@ export default function WorkblockControl({ onNavigateToSummary, onNavigateToArch
             await invoke("cancel_workblock_cmd", {
                 workblockId: activeWorkblock.id,
             });
-            setActiveWorkblock(null);
-            setTimerState(null);
-            setTimeRemaining(null);
+
+            // Explicitly reload state from backend to ensure UI updates
+            await loadActiveWorkblock();
+            await loadTimerState();
         } catch (error) {
             console.error("Failed to cancel workblock:", error);
             alert(`Failed to cancel workblock: ${error}`);
