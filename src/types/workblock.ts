@@ -51,6 +51,13 @@ export interface AggregateTimelineData {
     workblock_status?: string;
 }
 
+export interface WorkblockBoundary {
+    id: number;
+    start_time: string;
+    end_time?: string;
+    status: "active" | "completed" | "cancelled";
+}
+
 export interface ActivityData {
     words: string;
     total_minutes: number;
@@ -75,6 +82,7 @@ export interface DailyAggregate {
     timeline_data: AggregateTimelineData[];
     activity_data: ActivityData[];
     word_frequency: WordFrequency[];
+    workblock_boundaries?: WorkblockBoundary[]; // Optional for backward compatibility with old archived data
 }
 
 export interface DailyVisualizationData {

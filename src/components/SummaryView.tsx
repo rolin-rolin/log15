@@ -194,7 +194,11 @@ export default function SummaryView({ onBack, date }: SummaryViewProps) {
             <div className="summary-content">
                 {activeTab === "aggregate" && hasAggregate ? (
                     <div>
-                        <TimelineChart timelineData={vizData.daily_aggregate.timeline_data} title="Daily Timeline" />
+                        <TimelineChart
+                            timelineData={vizData.daily_aggregate.timeline_data}
+                            title="Daily Timeline"
+                            workblockBoundaries={vizData.daily_aggregate.workblock_boundaries}
+                        />
                         <ActivityChart
                             activityData={vizData.daily_aggregate.activity_data}
                             title="Daily Activity Breakdown"

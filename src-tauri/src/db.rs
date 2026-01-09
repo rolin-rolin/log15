@@ -682,12 +682,21 @@ pub struct AggregateTimelineData {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+pub struct WorkblockBoundary {
+    pub id: i64,
+    pub start_time: String,
+    pub end_time: Option<String>,
+    pub status: String, // "active", "completed", or "cancelled"
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub struct DailyAggregate {
     pub total_workblocks: i32,
     pub total_minutes: i32,
     pub timeline_data: Vec<AggregateTimelineData>,
     pub activity_data: Vec<ActivityData>,
     pub word_frequency: Vec<WordFrequency>,
+    pub workblock_boundaries: Vec<WorkblockBoundary>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -939,12 +948,27 @@ pub fn generate_daily_aggregate(app: &AppHandle, date: &str) -> Result<DailyAggr
         .map(|wb| wb.duration_minutes.unwrap_or(0))
         .sum();
     
+    // Generate workblock boundaries (sorted by start_time to match chronological order)
+    let mut workblock_boundaries: Vec<WorkblockBoundary> = workblocks
+        .iter()
+        .map(|wb| WorkblockBoundary {
+            id: wb.id.unwrap(),
+            start_time: wb.start_time.clone(),
+            end_time: wb.end_time.clone(),
+            status: wb.status.as_str().to_string(),
+        })
+        .collect();
+    
+    // Sort by start_time to ensure chronological order
+    workblock_boundaries.sort_by(|a, b| a.start_time.cmp(&b.start_time));
+    
     Ok(DailyAggregate {
         total_workblocks,
         total_minutes: aggregate_total_minutes,
         timeline_data: all_timeline_data,
         activity_data,
         word_frequency,
+        workblock_boundaries,
     })
 }
 
