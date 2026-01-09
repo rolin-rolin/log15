@@ -798,14 +798,14 @@ pub fn generate_workblock_visualization(
         })
         .collect();
     
-    // Generate word frequency
+    // Generate activity frequency (count entire phrase as one activity)
     let mut word_freq_map: HashMap<String, i32> = HashMap::new();
     for interval in &intervals {
         if let Some(words) = &interval.words {
-            // Split words and count each
-            for word in words.split_whitespace() {
-                let word_lower = word.to_lowercase();
-                *word_freq_map.entry(word_lower).or_insert(0) += 1;
+            // Count entire phrase as one activity (not split by words)
+            let words_lower = words.to_lowercase().trim().to_string();
+            if !words_lower.is_empty() {
+                *word_freq_map.entry(words_lower).or_insert(0) += 1;
             }
         }
     }
@@ -897,11 +897,11 @@ pub fn generate_daily_aggregate(app: &AppHandle, date: &str) -> Result<DailyAggr
                 }
             }
             
-            // Add to word frequency
+            // Add to activity frequency (count entire phrase as one activity)
             if let Some(words) = &interval.words {
-                for word in words.split_whitespace() {
-                    let word_lower = word.to_lowercase();
-                    *word_freq_map.entry(word_lower).or_insert(0) += 1;
+                let words_lower = words.to_lowercase().trim().to_string();
+                if !words_lower.is_empty() {
+                    *word_freq_map.entry(words_lower).or_insert(0) += 1;
                 }
             }
         }

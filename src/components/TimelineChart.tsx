@@ -48,7 +48,7 @@ export default function TimelineChart({ timelineData, title = "Timeline" }: Time
                             <div
                                 style={{
                                     fontSize: "12px",
-                                    color: "#666",
+                                    color: "white",
                                     textAlign: "right",
                                 }}
                             >
@@ -57,7 +57,7 @@ export default function TimelineChart({ timelineData, title = "Timeline" }: Time
                             <div
                                 style={{
                                     fontSize: "12px",
-                                    color: interval.workblock_status === "cancelled" ? "#e91e63" : "#333",
+                                    color: "white",
                                     fontWeight: interval.workblock_status === "cancelled" ? 600 : 400,
                                 }}
                             >

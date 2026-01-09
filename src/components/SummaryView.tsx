@@ -179,13 +179,13 @@ export default function SummaryView({ onBack, date }: SummaryViewProps) {
                             Daily Aggregate
                         </button>
                     )}
-                    {vizData.workblocks.map((wb) => (
+                    {vizData.workblocks.map((wb, index) => (
                         <button
                             key={wb.id}
                             className={`tab-button ${activeTab === `workblock-${wb.id}` ? "active" : ""}`}
                             onClick={() => setActiveTab(`workblock-${wb.id}`)}
                         >
-                            Workblock #{wb.id}
+                            Workblock #{index + 1}
                         </button>
                     ))}
                 </div>
@@ -207,7 +207,8 @@ export default function SummaryView({ onBack, date }: SummaryViewProps) {
                 ) : hasWorkblocks ? (
                     (() => {
                         const workblockId = parseInt(activeTab.replace("workblock-", ""));
-                        const workblock = vizData.workblocks.find((wb) => wb.id === workblockId);
+                        const workblockIndex = vizData.workblocks.findIndex((wb) => wb.id === workblockId);
+                        const workblock = workblockIndex >= 0 ? vizData.workblocks[workblockIndex] : null;
 
                         if (!workblock) {
                             return (
@@ -217,19 +218,21 @@ export default function SummaryView({ onBack, date }: SummaryViewProps) {
                             );
                         }
 
+                        const workblockNumber = workblockIndex + 1;
+
                         return (
                             <div>
                                 <TimelineChart
                                     timelineData={workblock.timeline_data}
-                                    title={`Workblock #${workblock.id} Timeline`}
+                                    title={`Workblock #${workblockNumber} Timeline`}
                                 />
                                 <ActivityChart
                                     activityData={workblock.activity_data}
-                                    title={`Workblock #${workblock.id} Activity Breakdown`}
+                                    title={`Workblock #${workblockNumber} Activity Breakdown`}
                                 />
                                 <WordFrequencyChart
                                     wordFrequency={workblock.word_frequency}
-                                    title={`Workblock #${workblock.id} Word Frequency`}
+                                    title={`Workblock #${workblockNumber} Word Frequency`}
                                 />
                             </div>
                         );

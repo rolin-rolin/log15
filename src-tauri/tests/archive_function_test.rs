@@ -171,12 +171,13 @@ fn simulate_archive_daily_data(conn: &Connection, date: &str) -> Result<String, 
             })
         }).collect();
         
-        // Generate word frequency
+        // Generate activity frequency (count entire phrase as one activity)
         let mut word_freq: std::collections::HashMap<String, i32> = std::collections::HashMap::new();
         for (_, _, _, _, words, _) in &intervals {
             if let Some(w) = words {
-                for word in w.split_whitespace() {
-                    *word_freq.entry(word.to_lowercase()).or_insert(0) += 1;
+                let w_lower = w.to_lowercase().trim().to_string();
+                if !w_lower.is_empty() {
+                    *word_freq.entry(w_lower).or_insert(0) += 1;
                 }
             }
         }
@@ -230,11 +231,9 @@ fn simulate_archive_daily_data(conn: &Connection, date: &str) -> Result<String, 
             if let Some(w) = words {
                 let w_lower = w.to_lowercase().trim().to_string();
                 if !w_lower.is_empty() {
-                    *aggregate_activity.entry(w_lower).or_insert(0) += 15;
-                }
-                
-                for word in w.split_whitespace() {
-                    *aggregate_word_freq.entry(word.to_lowercase()).or_insert(0) += 1;
+                    *aggregate_activity.entry(w_lower.clone()).or_insert(0) += 15;
+                    // Count entire phrase as one activity (not split by words)
+                    *aggregate_word_freq.entry(w_lower).or_insert(0) += 1;
                 }
             }
         }
