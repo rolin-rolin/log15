@@ -11,9 +11,14 @@ interface WorkblockControlProps {
 export default function WorkblockControl({ onNavigateToSummary, onNavigateToArchive }: WorkblockControlProps) {
     const [activeWorkblock, setActiveWorkblock] = useState<Workblock | null>(null);
     const [timerState, setTimerState] = useState<TimerState | null>(null);
-    const [duration, setDuration] = useState<number>(60); // Default 60 minutes
+    const [hours, setHours] = useState<number>(1); // Default 1 hour
+    const [minutes, setMinutes] = useState<number>(0); // Default 0 minutes
     const [timeRemaining, setTimeRemaining] = useState<number | null>(null);
     const [loading, setLoading] = useState(false);
+    const [showInfoOverlay, setShowInfoOverlay] = useState(false);
+
+    // Calculate total duration in minutes
+    const duration = hours * 60 + minutes;
 
     // Load active workblock on mount
     useEffect(() => {
@@ -129,19 +134,20 @@ export default function WorkblockControl({ onNavigateToSummary, onNavigateToArch
     };
 
     return (
-        <div style={{ padding: "20px", maxWidth: "600px", margin: "0 auto" }}>
-            <div
-                style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                    marginBottom: "20px",
-                    flexWrap: "wrap",
-                    gap: "10px",
-                }}
-            >
-                <h1 style={{ margin: 0 }}>Log15 - Workblock Tracker</h1>
-                <div style={{ display: "flex", gap: "10px" }}>
+        <div
+            style={{
+                padding: "20px",
+                maxWidth: "600px",
+                margin: "0 auto",
+                display: "flex",
+                flexDirection: "column",
+                justifyContent: "flex-start",
+                alignItems: "center",
+            }}
+        >
+            <div style={{ textAlign: "center", marginBottom: "20px", width: "100%" }}>
+                <h1 style={{ margin: 0, marginBottom: "15px" }}>Log15</h1>
+                <div style={{ display: "flex", gap: "10px", justifyContent: "center" }}>
                     {onNavigateToSummary && (
                         <button
                             onClick={onNavigateToSummary}
@@ -184,6 +190,8 @@ export default function WorkblockControl({ onNavigateToSummary, onNavigateToArch
                         borderRadius: "8px",
                         padding: "20px",
                         marginTop: "20px",
+                        width: "100%",
+                        textAlign: "center",
                     }}
                 >
                     <h2>Active Workblock</h2>
@@ -207,7 +215,7 @@ export default function WorkblockControl({ onNavigateToSummary, onNavigateToArch
                         </div>
                     )}
 
-                    <div style={{ marginTop: "20px", display: "flex", gap: "10px" }}>
+                    <div style={{ marginTop: "20px", display: "flex", gap: "10px", justifyContent: "center" }}>
                         <button
                             onClick={handleCancelWorkblock}
                             disabled={loading}
@@ -231,35 +239,55 @@ export default function WorkblockControl({ onNavigateToSummary, onNavigateToArch
                         borderRadius: "8px",
                         padding: "20px",
                         marginTop: "20px",
+                        width: "100%",
+                        textAlign: "center",
                     }}
                 >
                     <h2>Start New Workblock</h2>
-                    <div style={{ marginTop: "15px" }}>
-                        <label style={{ display: "block", marginBottom: "10px" }}>
-                            Duration (15-minute increments):
-                        </label>
-                        <select
-                            value={duration}
-                            onChange={(e) => setDuration(Number(e.target.value))}
-                            style={{
-                                padding: "8px",
-                                fontSize: "16px",
-                                borderRadius: "5px",
-                                border: "1px solid #ccc",
-                                width: "100%",
-                                maxWidth: "200px",
-                            }}
-                        >
-                            <option value={1}>1 minute (testing)</option>
-                            <option value={15}>15 minutes</option>
-                            <option value={30}>30 minutes</option>
-                            <option value={45}>45 minutes</option>
-                            <option value={60}>1 hour</option>
-                            <option value={90}>1.5 hours</option>
-                            <option value={120}>2 hours</option>
-                            <option value={180}>3 hours</option>
-                            <option value={240}>4 hours</option>
-                        </select>
+                    <div style={{ marginTop: "15px", display: "flex", flexDirection: "column", alignItems: "center" }}>
+                        <label style={{ display: "block", marginBottom: "10px" }}>Duration:</label>
+                        <div style={{ display: "flex", gap: "15px", alignItems: "center" }}>
+                            <div style={{ display: "flex", flexDirection: "column", gap: "5px" }}>
+                                <label style={{ fontSize: "12px", color: "#666" }}>Hours</label>
+                                <select
+                                    value={hours}
+                                    onChange={(e) => setHours(Number(e.target.value))}
+                                    style={{
+                                        padding: "8px",
+                                        fontSize: "16px",
+                                        borderRadius: "5px",
+                                        border: "1px solid #ccc",
+                                        width: "100px",
+                                    }}
+                                >
+                                    {[0, 1, 2, 3, 4].map((h) => (
+                                        <option key={h} value={h}>
+                                            {h} {h === 1 ? "hr" : "hrs"}
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+                            <div style={{ display: "flex", flexDirection: "column", gap: "5px" }}>
+                                <label style={{ fontSize: "12px", color: "#666" }}>Minutes</label>
+                                <select
+                                    value={minutes}
+                                    onChange={(e) => setMinutes(Number(e.target.value))}
+                                    style={{
+                                        padding: "8px",
+                                        fontSize: "16px",
+                                        borderRadius: "5px",
+                                        border: "1px solid #ccc",
+                                        width: "100px",
+                                    }}
+                                >
+                                    {[0, 15, 30, 45].map((m) => (
+                                        <option key={m} value={m}>
+                                            {m} min
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+                        </div>
                     </div>
                     <button
                         onClick={handleStartWorkblock}
@@ -280,14 +308,81 @@ export default function WorkblockControl({ onNavigateToSummary, onNavigateToArch
                 </div>
             )}
 
-            <div style={{ marginTop: "30px", padding: "15px", backgroundColor: "#f5f5f5", borderRadius: "5px" }}>
-                <h3>How it works:</h3>
-                <ul style={{ lineHeight: "1.8" }}>
-                    <li>Every 15 minutes, you'll be prompted to enter 1-2 words about what you're doing</li>
-                    <li>The overlay window will appear at the bottom-right corner</li>
-                    <li>After the last interval, you'll see a "Summary Ready" notification</li>
-                    <li>If you don't respond within 10 minutes, "Away from workspace" will be auto-recorded</li>
-                </ul>
+            <div style={{ marginTop: "30px", textAlign: "center", position: "relative" }}>
+                <button
+                    onMouseEnter={() => setShowInfoOverlay(true)}
+                    onMouseLeave={() => setShowInfoOverlay(false)}
+                    style={{
+                        width: "24px",
+                        height: "32px",
+                        borderRadius: "12px",
+                        border: "2px solid #4a90e2",
+                        backgroundColor: "transparent",
+                        color: "#4a90e2",
+                        fontSize: "18px",
+                        cursor: "pointer",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        margin: "0 auto",
+                        padding: 0,
+                    }}
+                    aria-label="How it works"
+                >
+                    ℹ
+                </button>
+                {showInfoOverlay && (
+                    <div
+                        style={{
+                            position: "absolute",
+                            bottom: "100%",
+                            left: "50%",
+                            transform: "translateX(-50%)",
+                            marginBottom: "10px",
+                            padding: "15px",
+                            backgroundColor: "#333",
+                            color: "white",
+                            borderRadius: "8px",
+                            width: "300px",
+                            boxShadow: "0 4px 12px rgba(0, 0, 0, 0.3)",
+                            zIndex: 1000,
+                            textAlign: "left",
+                        }}
+                        onMouseEnter={() => setShowInfoOverlay(true)}
+                        onMouseLeave={() => setShowInfoOverlay(false)}
+                    >
+                        <h3 style={{ margin: "0 0 10px 0", fontSize: "16px", fontWeight: 600, textAlign: "left" }}>
+                            How it works:
+                        </h3>
+                        <ul
+                            style={{
+                                margin: 0,
+                                paddingLeft: "20px",
+                                lineHeight: "1.6",
+                                fontSize: "14px",
+                                textAlign: "left",
+                            }}
+                        >
+                            <li>Every 15 minutes, you'll be prompted to enter 1-2 words about what you're doing</li>
+                            <li>The prompt window will show up on the top right of your screen</li>
+                            <li>At the end of your workblock, you can review what you did</li>
+                            <li>If you don't respond within 10 minutes, "Away from workspace" will be auto-recorded</li>
+                        </ul>
+                        <div
+                            style={{
+                                position: "absolute",
+                                bottom: "-8px",
+                                left: "50%",
+                                transform: "translateX(-50%)",
+                                width: 0,
+                                height: 0,
+                                borderLeft: "8px solid transparent",
+                                borderRight: "8px solid transparent",
+                                borderTop: "8px solid #333",
+                            }}
+                        />
+                    </div>
+                )}
             </div>
         </div>
     );

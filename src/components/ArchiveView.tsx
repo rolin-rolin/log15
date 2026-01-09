@@ -71,15 +71,17 @@ export default function ArchiveView({ onBack }: { onBack?: () => void }) {
                 <div className="archive-list">
                     {archivedDates.map((archive) => (
                         <div key={archive.date} className="archive-item" onClick={() => setSelectedDate(archive.date)}>
-                            <div className="archive-item-date">{formatDate(archive.date)}</div>
-                            <div className="archive-item-stats">
-                                <span>
-                                    {archive.total_workblocks} workblock{archive.total_workblocks !== 1 ? "s" : ""}
-                                </span>
-                                <span>•</span>
-                                <span>
-                                    {Math.floor(archive.total_minutes / 60)}h {archive.total_minutes % 60}m
-                                </span>
+                            <div className="archive-item-content">
+                                <div className="archive-item-date">{formatDate(archive.date)}</div>
+                                <div className="archive-item-stats">
+                                    <span>
+                                        {archive.total_workblocks} workblock{archive.total_workblocks !== 1 ? "s" : ""}
+                                    </span>
+                                    <span>•</span>
+                                    <span>
+                                        {Math.floor(archive.total_minutes / 60)}h {archive.total_minutes % 60}m
+                                    </span>
+                                </div>
                             </div>
                             <div className="archive-item-arrow">→</div>
                         </div>
