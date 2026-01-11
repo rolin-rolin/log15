@@ -280,7 +280,7 @@ export default function WorkblockControl({ onNavigateToSummary, onNavigateToArch
                                         width: "100px",
                                     }}
                                 >
-                                    {[0, 15, 30, 45].map((m) => (
+                                    {[0, 1, 15, 30, 45].map((m) => (
                                         <option key={m} value={m}>
                                             {m} min
                                         </option>

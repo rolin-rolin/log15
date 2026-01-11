@@ -24,17 +24,43 @@ impl WindowManager {
     /// Show the prompt window for an interval
     /// Always creates a fresh window - closes any existing window first
     pub async fn show_prompt_window(&self, interval_id: i64) -> Result<(), String> {
+        // #region agent log
+        use std::fs::OpenOptions;
+        use std::io::Write;
+        if let Ok(mut file) = OpenOptions::new().create(true).append(true).open("/Users/ronaldlin/log15/.cursor/debug.log") {
+            let _ = writeln!(file, r#"{{"location":"window_manager.rs:26","message":"show_prompt_window called","data":{{"interval_id":{},"timestamp":{}}},"timestamp":{},"sessionId":"debug-session","runId":"run3","hypothesisId":"G"}}"#, interval_id, chrono::Utc::now().timestamp_millis(), chrono::Utc::now().timestamp_millis());
+        }
+        // #endregion
         println!("[WINDOW_MGR] show_prompt_window called with interval_id={}", interval_id);
         
-        // First, close any existing window (simplifies state management)
-        self.hide_prompt_window().await.ok(); // Ignore errors if no window exists
+        // First, close any existing window directly without emitting prompt-hide event
+        // (to avoid interfering with frontend's own fade-out sequence)
+        // #region agent log
+        if let Ok(mut file) = OpenOptions::new().create(true).append(true).open("/Users/ronaldlin/log15/.cursor/debug.log") {
+            let _ = writeln!(file, r#"{{"location":"window_manager.rs:36","message":"Closing existing window directly (not using hide_prompt_window)","data":{{"timestamp":{}}},"timestamp":{},"sessionId":"debug-session","runId":"run3","hypothesisId":"G"}}"#, chrono::Utc::now().timestamp_millis(), chrono::Utc::now().timestamp_millis());
+        }
+        // #endregion
+        let mut prompt = self.prompt_window.lock().await;
+        if let Some(window) = prompt.take() {
+            println!("[WINDOW_MGR] Closing existing window directly");
+            let _ = window.close();
+        } else if let Some(window) = self.app.get_webview_window("prompt") {
+            println!("[WINDOW_MGR] Window exists in Tauri but not in state, closing it directly");
+            let _ = window.close();
+        }
+        drop(prompt);
         
-        // Wait a moment for window to fully close before creating a new one
-        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+        // Clear interval ID state
+        *self.current_interval_id.lock().await = None;
+        *self.is_summary_ready.lock().await = false;
+        
+        // Wait for fade-out animation to complete (300ms) + buffer before creating a new window
+        // This ensures the old window is fully closed before the new one appears
+        tokio::time::sleep(tokio::time::Duration::from_millis(350)).await; // 300ms animation + 50ms buffer
         
         // Double-check: if window still exists in Tauri, try to close it again
         if let Some(existing_window) = self.app.get_webview_window("prompt") {
-            println!("[WINDOW_MGR] Window still exists after hide, force closing");
+            println!("[WINDOW_MGR] Window still exists after close, force closing");
             let _ = existing_window.close();
             tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
         }
@@ -194,6 +220,13 @@ impl WindowManager {
                 // Reset summary state
                 *self.is_summary_ready.lock().await = false;
             } else {
+                // #region agent log
+                use std::fs::OpenOptions;
+                use std::io::Write;
+                if let Ok(mut file) = OpenOptions::new().create(true).append(true).open("/Users/ronaldlin/log15/.cursor/debug.log") {
+                    let _ = writeln!(file, r#"{{"location":"window_manager.rs:198","message":"Emitting prompt-hide event","data":{{"timestamp":{}}},"timestamp":{},"sessionId":"debug-session","runId":"run1","hypothesisId":"A"}}"#, chrono::Utc::now().timestamp_millis(), chrono::Utc::now().timestamp_millis());
+                }
+                // #endregion
                 // Trigger fade-out animation (handled by frontend)
                 window
                     .emit("prompt-hide", ())

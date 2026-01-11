@@ -57,9 +57,6 @@ export default function PromptPage() {
                 height: "100vh",
                 margin: 0,
                 padding: 0,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
                 backgroundColor: "transparent",
             }}
         >

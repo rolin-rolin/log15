@@ -171,8 +171,15 @@ async fn submit_interval_words(
         let timer = timer_manager.lock().await;
         timer.complete_workblock(workblock_id).await.ok();
     } else {
-        // Hide prompt window normally
-        window_mgr.hide_prompt_window().await.ok();
+        // #region agent log
+        use std::fs::OpenOptions;
+        use std::io::Write;
+        if let Ok(mut file) = OpenOptions::new().create(true).append(true).open("/Users/ronaldlin/log15/.cursor/debug.log") {
+            let _ = writeln!(file, r#"{{"location":"lib.rs:175","message":"NOT calling hide_prompt_window - letting frontend handle timing","data":{{"is_last_interval":false,"timestamp":{}}},"timestamp":{},"sessionId":"debug-session","runId":"post-fix","hypothesisId":"A"}}"#, chrono::Utc::now().timestamp_millis(), chrono::Utc::now().timestamp_millis());
+        }
+        // #endregion
+        // Don't hide window here - let frontend handle closing after checkmark animation completes
+        // Frontend will call hide_prompt_window_cmd after the 2-second checkmark display
     }
     drop(window_mgr);
     

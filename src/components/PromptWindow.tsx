@@ -7,6 +7,8 @@ interface PromptWindowProps {
     intervalId: number | null;
 }
 
+const CHECKMARK_DURATION_MS = 2000; // 2 seconds
+
 export default function PromptWindow({ intervalId }: PromptWindowProps) {
     const [words, setWords] = useState("");
     const [showCheckmark, setShowCheckmark] = useState(false);
@@ -73,7 +75,7 @@ export default function PromptWindow({ intervalId }: PromptWindowProps) {
             return;
         }
 
-        // Show checkmark
+        // Show checkmark immediately
         setShowCheckmark(true);
 
         // Submit words
@@ -83,18 +85,17 @@ export default function PromptWindow({ intervalId }: PromptWindowProps) {
                 words: words.trim(),
             });
 
-            // If this is the last interval, show summary ready instead of fading out
+            // If this is the last interval, show summary ready after checkmark duration
             if (result.is_last_interval) {
-                // Wait a moment for checkmark, then show summary
                 setTimeout(() => {
                     setShowSummaryReady(true);
                     setShowCheckmark(false);
-                }, 1000);
+                }, CHECKMARK_DURATION_MS);
             } else {
-                // Fade out after showing checkmark
+                // For non-last intervals, close window after checkmark duration
                 setTimeout(() => {
-                    handleFadeOut();
-                }, 1000); // Show checkmark for 1 second
+                    invoke("hide_prompt_window_cmd").catch(console.error);
+                }, CHECKMARK_DURATION_MS);
             }
         } catch (error) {
             console.error("Failed to submit words:", error);
@@ -129,13 +130,13 @@ export default function PromptWindow({ intervalId }: PromptWindowProps) {
                 </div>
             ) : showCheckmark ? (
                 <div className="checkmark-container">
-                    <div className="checkmark">✓</div>
+                    <div className="checkmark"></div>
                 </div>
             ) : intervalId ? (
                 <div className="prompt-content">
-                    <label htmlFor="words-input" className="prompt-label">
+                    <div className="prompt-label">
                         What did you do? (1-2 words)
-                    </label>
+                    </div>
                     <input
                         id="words-input"
                         type="text"
@@ -147,9 +148,6 @@ export default function PromptWindow({ intervalId }: PromptWindowProps) {
                         autoFocus
                         maxLength={50}
                     />
-                    <button onClick={handleSubmit} disabled={!words.trim()} className="submit-button">
-                        Submit
-                    </button>
                 </div>
             ) : (
                 <div className="prompt-content">
