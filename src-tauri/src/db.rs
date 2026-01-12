@@ -512,28 +512,107 @@ pub fn check_and_reset_daily(app: &AppHandle) -> Result<Option<String>> {
         return Ok(Some(previous_date));
     }
     
-    // Check if we need to archive yesterday (if there are completed workblocks from yesterday)
-    let yesterday = (Local::now() - chrono::Duration::days(1)).format("%Y-%m-%d").to_string();
+    // Check if we need to archive any dates with unarchived workblocks
+    // This includes yesterday and any older dates that may have been missed
     let mut stmt = conn.prepare(
-        "SELECT COUNT(*) FROM workblocks 
-         WHERE date = ?1 AND is_archived = 0"
+        "SELECT DISTINCT date FROM workblocks 
+         WHERE is_archived = 0 AND status = 'completed' AND date != ?1
+         ORDER BY date DESC"
     )?;
     
-    let count: i32 = stmt.query_row(params![yesterday], |row| row.get(0))?;
+    let unarchived_dates: Vec<String> = stmt.query_map(params![today], |row| {
+        Ok(row.get::<_, String>(0)?)
+    })?.collect::<Result<Vec<_>, _>>()?;
     
-    if count > 0 {
-        archive_daily_data(app, &yesterday)?;
-        return Ok(Some(yesterday));
+    if !unarchived_dates.is_empty() {
+        // Archive the most recent unarchived date (closest to today)
+        let date_to_archive = &unarchived_dates[0];
+        archive_daily_data(app, date_to_archive)?;
+        return Ok(Some(date_to_archive.clone()));
     }
     
     Ok(None)
+}
+
+/// Archive all dates with unarchived workblocks (backfill function)
+pub fn archive_all_unarchived_dates(app: &AppHandle) -> Result<Vec<String>> {
+    // #region agent log
+    if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open("/Users/ronaldlin/log15/.cursor/debug.log") {
+        use std::io::Write;
+        let _ = writeln!(file, r#"{{"location":"db.rs:537","message":"archive_all_unarchived_dates entry","data":{{}},"timestamp":{},"sessionId":"debug-session","runId":"run3","hypothesisId":"fix"}}"#, std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis());
+    }
+    // #endregion
+    let today = get_today_date();
+    let conn = get_db_connection(app)?;
+    
+    // Get all dates with unarchived workblocks (any status, including cancelled, and not today)
+    // This includes all workblocks from past dates for a holistic overview
+    let mut stmt = conn.prepare(
+        "SELECT DISTINCT date FROM workblocks 
+         WHERE is_archived = 0 AND date != ?1 AND date < ?1
+         ORDER BY date DESC"
+    )?;
+    
+    let unarchived_dates: Vec<String> = stmt.query_map(params![today], |row| {
+        Ok(row.get::<_, String>(0)?)
+    })?.collect::<Result<Vec<_>, _>>()?;
+    
+    // #region agent log - Check Jan 10 workblock statuses
+    let jan10_statuses: Vec<(String, i32)> = conn.prepare("SELECT status, COUNT(*) FROM workblocks WHERE date = '2026-01-10' GROUP BY status")?.query_map([], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, i32>(1)?))
+    })?.collect::<Result<Vec<_>, _>>().unwrap_or_default();
+    let jan10_archived_count: i32 = conn.prepare("SELECT COUNT(*) FROM workblocks WHERE date = '2026-01-10' AND is_archived = 1")?.query_row([], |row| row.get(0)).unwrap_or(0);
+    if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open("/Users/ronaldlin/log15/.cursor/debug.log") {
+        use std::io::Write;
+        let _ = writeln!(file, r#"{{"location":"db.rs:551","message":"unarchived dates found with jan10 details","data":{{"unarchived_dates":{:?},"today":"{}","jan10_statuses":{:?},"jan10_archived_count":{}}},"timestamp":{},"sessionId":"debug-session","runId":"run4","hypothesisId":"fix"}}"#, unarchived_dates, today, jan10_statuses, jan10_archived_count, std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis());
+    }
+    // #endregion
+    
+    let mut archived_dates = Vec::new();
+    for date in &unarchived_dates {
+        // #region agent log
+        if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open("/Users/ronaldlin/log15/.cursor/debug.log") {
+            use std::io::Write;
+            let _ = writeln!(file, r#"{{"location":"db.rs:558","message":"attempting to archive date","data":{{"date":"{}"}},"timestamp":{},"sessionId":"debug-session","runId":"run3","hypothesisId":"fix"}}"#, date, std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis());
+        }
+        // #endregion
+        match archive_daily_data(app, date) {
+            Ok(_) => {
+                archived_dates.push(date.clone());
+                // #region agent log
+                if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open("/Users/ronaldlin/log15/.cursor/debug.log") {
+                    use std::io::Write;
+                    let _ = writeln!(file, r#"{{"location":"db.rs:565","message":"date archived successfully","data":{{"date":"{}"}},"timestamp":{},"sessionId":"debug-session","runId":"run3","hypothesisId":"fix"}}"#, date, std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis());
+                }
+                // #endregion
+            }
+            Err(e) => {
+                eprintln!("Failed to archive date {}: {}", date, e);
+                // #region agent log
+                if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open("/Users/ronaldlin/log15/.cursor/debug.log") {
+                    use std::io::Write;
+                    let _ = writeln!(file, r#"{{"location":"db.rs:571","message":"date archive failed","data":{{"date":"{}","error":"{}"}},"timestamp":{},"sessionId":"debug-session","runId":"run3","hypothesisId":"fix"}}"#, date, e, std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis());
+                }
+                // #endregion
+            }
+        }
+    }
+    
+    // #region agent log
+    if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open("/Users/ronaldlin/log15/.cursor/debug.log") {
+        use std::io::Write;
+        let _ = writeln!(file, r#"{{"location":"db.rs:577","message":"archive_all_unarchived_dates exit","data":{{"archived_count":{}}},"timestamp":{},"sessionId":"debug-session","runId":"run3","hypothesisId":"fix"}}"#, archived_dates.len(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis());
+    }
+    // #endregion
+    
+    Ok(archived_dates)
 }
 
 /// Archive daily data and generate visualization JSON
 pub fn archive_daily_data(app: &AppHandle, date: &str) -> Result<DailyArchive> {
     let conn = get_db_connection(app)?;
     
-    // Get all workblocks for the date
+    // Get all workblocks for the date (including non-completed ones)
     let workblocks = get_workblocks_by_date(app, date)?;
     
     if workblocks.is_empty() {
@@ -543,9 +622,10 @@ pub fn archive_daily_data(app: &AppHandle, date: &str) -> Result<DailyArchive> {
         ));
     }
     
-    // Mark all workblocks as archived
+    // Mark all workblocks as archived (including cancelled ones for holistic overview)
+    // Only mark non-cancelled workblocks as completed (preserve cancelled status)
     conn.execute(
-        "UPDATE workblocks SET is_archived = 1 WHERE date = ?1",
+        "UPDATE workblocks SET is_archived = 1, status = CASE WHEN status = 'cancelled' THEN 'cancelled' ELSE 'completed' END, end_time = COALESCE(end_time, datetime('now')) WHERE date = ?1",
         params![date],
     )?;
     
@@ -582,6 +662,12 @@ pub fn archive_daily_data(app: &AppHandle, date: &str) -> Result<DailyArchive> {
 
 /// Get all archived dates
 pub fn get_all_archived_dates(app: &AppHandle) -> Result<Vec<DailyArchive>> {
+    // #region agent log
+    if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open("/Users/ronaldlin/log15/.cursor/debug.log") {
+        use std::io::Write;
+        let _ = writeln!(file, r#"{{"location":"db.rs:584","message":"get_all_archived_dates entry","data":{{}},"timestamp":{},"sessionId":"debug-session","runId":"run2","hypothesisId":"H3"}}"#, std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis());
+    }
+    // #endregion
     let conn = get_db_connection(app)?;
     let mut stmt = conn.prepare(
         "SELECT id, date, total_workblocks, total_minutes, visualization_data, archived_at 
@@ -589,21 +675,73 @@ pub fn get_all_archived_dates(app: &AppHandle) -> Result<Vec<DailyArchive>> {
          ORDER BY date DESC"
     )?;
     
+    // #region agent log
+    let count_query: i32 = conn.query_row("SELECT COUNT(*) FROM daily_archives", [], |row| row.get(0)).unwrap_or(0);
+    let unarchived_dates: Vec<String> = conn.prepare("SELECT DISTINCT date FROM workblocks WHERE is_archived = 0 AND status = 'completed' ORDER BY date DESC")?.query_map([], |row| row.get::<_, String>(0)).and_then(|iter| iter.collect::<Result<Vec<_>, _>>()).unwrap_or_default();
+    let all_archive_dates: Vec<String> = conn.prepare("SELECT date FROM daily_archives ORDER BY date DESC")?.query_map([], |row| row.get::<_, String>(0)).and_then(|iter| iter.collect::<Result<Vec<_>, _>>()).unwrap_or_default();
+    let dates_9_10_11_workblocks: Vec<(String, i32)> = ["2026-01-09", "2026-01-10", "2026-01-11"].iter().map(|date| {
+        let count: i32 = conn.prepare("SELECT COUNT(*) FROM workblocks WHERE date = ?1").and_then(|mut stmt| stmt.query_row(params![date], |row| row.get(0))).unwrap_or(0);
+        (date.to_string(), count)
+    }).collect();
+    let dates_9_10_11_archives: Vec<(String, bool)> = ["2026-01-09", "2026-01-10", "2026-01-11"].iter().map(|date| {
+        let exists: bool = conn.prepare("SELECT EXISTS(SELECT 1 FROM daily_archives WHERE date = ?1)").and_then(|mut stmt| stmt.query_row(params![date], |row| row.get(0))).unwrap_or(false);
+        (date.to_string(), exists)
+    }).collect();
+    if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open("/Users/ronaldlin/log15/.cursor/debug.log") {
+        use std::io::Write;
+        let _ = writeln!(file, r#"{{"location":"db.rs:591","message":"archive check detailed","data":{{"archive_count":{},"all_archive_dates":{:?},"unarchived_dates":{:?},"dates_9_10_11_workblocks":{:?},"dates_9_10_11_archives":{:?}}},"timestamp":{},"sessionId":"debug-session","runId":"run3","hypothesisId":"H3"}}"#, count_query, all_archive_dates, unarchived_dates, dates_9_10_11_workblocks, dates_9_10_11_archives, std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis());
+    }
+    // #endregion
+    
     let archive_iter = stmt.query_map([], |row| {
+        let date: String = row.get(1)?;
+        let viz_data: Option<String> = row.get(4)?;
+        let has_viz = viz_data.is_some();
+        // #region agent log
+        if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open("/Users/ronaldlin/log15/.cursor/debug.log") {
+            use std::io::Write;
+            let _ = writeln!(file, r#"{{"location":"db.rs:597","message":"deserializing archive row","data":{{"date":"{}","has_viz":{}}},"timestamp":{},"sessionId":"debug-session","runId":"run1","hypothesisId":"H1,H2"}}"#, date, has_viz, std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis());
+        }
+        // #endregion
         Ok(DailyArchive {
             id: row.get(0)?,
-            date: row.get(1)?,
+            date,
             total_workblocks: row.get(2)?,
             total_minutes: row.get(3)?,
-            visualization_data: row.get(4)?,
+            visualization_data: viz_data,
             archived_at: row.get(5)?,
         })
     })?;
     
     let mut archives = Vec::new();
+    let mut processed_count = 0;
     for archive in archive_iter {
+        processed_count += 1;
+        // #region agent log
+        match &archive {
+            Ok(a) => {
+                if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open("/Users/ronaldlin/log15/.cursor/debug.log") {
+                    use std::io::Write;
+                    let _ = writeln!(file, r#"{{"location":"db.rs:610","message":"archive deserialized successfully","data":{{"date":"{}","count":{}}},"timestamp":{},"sessionId":"debug-session","runId":"run1","hypothesisId":"H1,H2"}}"#, a.date, processed_count, std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis());
+                }
+            },
+            Err(e) => {
+                if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open("/Users/ronaldlin/log15/.cursor/debug.log") {
+                    use std::io::Write;
+                    let _ = writeln!(file, r#"{{"location":"db.rs:612","message":"archive deserialization error","data":{{"error":"{}","count":{}}},"timestamp":{},"sessionId":"debug-session","runId":"run1","hypothesisId":"H1,H2"}}"#, e, processed_count, std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis());
+                }
+            }
+        }
+        // #endregion
         archives.push(archive?);
     }
+    
+    // #region agent log
+    if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open("/Users/ronaldlin/log15/.cursor/debug.log") {
+        use std::io::Write;
+        let _ = writeln!(file, r#"{{"location":"db.rs:620","message":"get_all_archived_dates exit","data":{{"returned_count":{}}},"timestamp":{},"sessionId":"debug-session","runId":"run1","hypothesisId":"H1,H2,H3"}}"#, archives.len(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis());
+    }
+    // #endregion
     
     Ok(archives)
 }

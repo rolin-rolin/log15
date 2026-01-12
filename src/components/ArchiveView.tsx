@@ -16,10 +16,22 @@ export default function ArchiveView({ onBack }: { onBack?: () => void }) {
     const loadArchivedDates = async () => {
         setLoading(true);
         try {
+            // #region agent log
+            fetch('http://127.0.0.1:7243/ingest/e1aff560-78fd-4480-b3b6-3bd988b7d39c',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ArchiveView.tsx:19',message:'loadArchivedDates entry',data:{},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H4'})}).catch(()=>{});
+            // #endregion
             const dates = await invoke<DailyArchive[]>("get_all_archived_dates_cmd");
+            // #region agent log
+            fetch('http://127.0.0.1:7243/ingest/e1aff560-78fd-4480-b3b6-3bd988b7d39c',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ArchiveView.tsx:21',message:'invoke result received',data:{count:dates.length,dates:dates.map(d=>({date:d.date,id:d.id,hasViz:!!d.visualization_data}))},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H4'})}).catch(()=>{});
+            // #endregion
             setArchivedDates(dates);
+            // #region agent log
+            fetch('http://127.0.0.1:7243/ingest/e1aff560-78fd-4480-b3b6-3bd988b7d39c',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ArchiveView.tsx:23',message:'setArchivedDates called',data:{count:dates.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H4'})}).catch(()=>{});
+            // #endregion
         } catch (error) {
             console.error("Failed to load archived dates:", error);
+            // #region agent log
+            fetch('http://127.0.0.1:7243/ingest/e1aff560-78fd-4480-b3b6-3bd988b7d39c',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ArchiveView.tsx:25',message:'loadArchivedDates error',data:{error:String(error)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H4'})}).catch(()=>{});
+            // #endregion
         } finally {
             setLoading(false);
         }
@@ -69,6 +81,12 @@ export default function ArchiveView({ onBack }: { onBack?: () => void }) {
                 </div>
             ) : (
                 <div className="archive-list">
+                    {/* #region agent log */}
+                    {(() => {
+                        fetch('http://127.0.0.1:7243/ingest/e1aff560-78fd-4480-b3b6-3bd988b7d39c',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ArchiveView.tsx:72',message:'rendering archive list',data:{count:archivedDates.length,dates:archivedDates.map(d=>d.date)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H4'})}).catch(()=>{});
+                        return null;
+                    })()}
+                    {/* #endregion */}
                     {archivedDates.map((archive) => (
                         <div key={archive.date} className="archive-item" onClick={() => setSelectedDate(archive.date)}>
                             <div className="archive-item-content">
