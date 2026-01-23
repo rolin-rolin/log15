@@ -134,9 +134,7 @@ export default function PromptWindow({ intervalId }: PromptWindowProps) {
                 </div>
             ) : intervalId ? (
                 <div className="prompt-content">
-                    <div className="prompt-label">
-                        What did you do? (1-2 words)
-                    </div>
+                    <div className="prompt-label">What did you do? (1-2 words)</div>
                     <input
                         id="words-input"
                         type="text"

@@ -289,38 +289,9 @@ fn get_archived_day_cmd(app: tauri::AppHandle, date: String) -> Result<Option<Da
 
 #[tauri::command]
 fn get_all_archived_dates_cmd(app: tauri::AppHandle) -> Result<Vec<DailyArchive>, String> {
-    // #region agent log
-    if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open("/Users/ronaldlin/log15/.cursor/debug.log") {
-        use std::io::Write;
-        let _ = writeln!(file, r#"{{"location":"lib.rs:291","message":"get_all_archived_dates_cmd entry","data":{{}},"timestamp":{},"sessionId":"debug-session","runId":"post-fix","hypothesisId":"H5"}}"#, std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis());
-    }
-    // #endregion
     // Archive all unarchived dates before returning (backfill)
     let _ = archive_all_unarchived_dates(&app);
-    // #region agent log
-    if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open("/Users/ronaldlin/log15/.cursor/debug.log") {
-        use std::io::Write;
-        let _ = writeln!(file, r#"{{"location":"lib.rs:295","message":"archive_all_unarchived_dates called","data":{{}},"timestamp":{},"sessionId":"debug-session","runId":"post-fix","hypothesisId":"fix"}}"#, std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis());
-    }
-    // #endregion
-    let result = get_all_archived_dates(&app);
-    // #region agent log
-    match &result {
-        Ok(archives) => {
-            if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open("/Users/ronaldlin/log15/.cursor/debug.log") {
-                use std::io::Write;
-                let _ = writeln!(file, r#"{{"location":"lib.rs:302","message":"get_all_archived_dates_cmd success before serialization","data":{{"count":{}}},"timestamp":{},"sessionId":"debug-session","runId":"post-fix","hypothesisId":"H5"}}"#, archives.len(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis());
-            }
-        },
-        Err(e) => {
-            if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open("/Users/ronaldlin/log15/.cursor/debug.log") {
-                use std::io::Write;
-                let _ = writeln!(file, r#"{{"location":"lib.rs:304","message":"get_all_archived_dates_cmd error","data":{{"error":"{}"}},"timestamp":{},"sessionId":"debug-session","runId":"post-fix","hypothesisId":"H5"}}"#, e, std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis());
-            }
-        }
-    }
-    // #endregion
-    result.map_err(|e| e.to_string())
+    get_all_archived_dates(&app).map_err(|e| e.to_string())
 }
 
 // Visualization commands
