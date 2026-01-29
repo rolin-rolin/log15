@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import "./PromptWindow.css";
@@ -14,18 +14,27 @@ export default function PromptWindow({ intervalId }: PromptWindowProps) {
     const [showCheckmark, setShowCheckmark] = useState(false);
     const [isVisible, setIsVisible] = useState(false);
     const [showSummaryReady, setShowSummaryReady] = useState(false);
+    const showCheckmarkRef = useRef(false);
+    const intervalIdRef = useRef<number | null>(null);
 
     useEffect(() => {
         console.log("[PROMPT_WINDOW] intervalId changed:", intervalId);
+        intervalIdRef.current = intervalId;
         if (intervalId) {
             console.log("[PROMPT_WINDOW] Setting isVisible to true");
             setIsVisible(true);
             // Reset state when new interval comes in
             setShowCheckmark(false);
+            showCheckmarkRef.current = false;
             setShowSummaryReady(false);
             setWords("");
         }
     }, [intervalId]);
+
+    // Keep ref in sync with state
+    useEffect(() => {
+        showCheckmarkRef.current = showCheckmark;
+    }, [showCheckmark]);
 
     useEffect(() => {
         // Listen for hide event
@@ -34,7 +43,7 @@ export default function PromptWindow({ intervalId }: PromptWindowProps) {
             handleFadeOut();
         });
 
-        // Listen for auto-away event (window should close)
+        // Listen for auto-away event (window should close for non-last intervals)
         const unlistenAutoAway = listen("auto-away", () => {
             console.log("[PROMPT_WINDOW] Received auto-away event, closing window");
             handleFadeOut();
@@ -44,9 +53,19 @@ export default function PromptWindow({ intervalId }: PromptWindowProps) {
 
         // Listen for show summary ready event
         const unlistenSummary = listen("show-summary-ready", () => {
-            setShowSummaryReady(true);
-            setShowCheckmark(false);
-            setWords("");
+            // If checkmark is showing, wait for it to fade before showing summary
+            if (showCheckmarkRef.current) {
+                setTimeout(() => {
+                    setShowSummaryReady(true);
+                    setShowCheckmark(false);
+                    setWords("");
+                }, CHECKMARK_DURATION_MS);
+            } else {
+                // If no checkmark, show summary immediately
+                setShowSummaryReady(true);
+                setShowCheckmark(false);
+                setWords("");
+            }
         });
 
         // Listen for close summary event
@@ -67,6 +86,7 @@ export default function PromptWindow({ intervalId }: PromptWindowProps) {
         setTimeout(() => {
             setWords("");
             setShowCheckmark(false);
+            showCheckmarkRef.current = false;
         }, 300); // Wait for fade-out animation
     };
 
@@ -77,6 +97,7 @@ export default function PromptWindow({ intervalId }: PromptWindowProps) {
 
         // Show checkmark immediately
         setShowCheckmark(true);
+        showCheckmarkRef.current = true;
 
         // Submit words
         try {

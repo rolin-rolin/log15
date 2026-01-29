@@ -276,53 +276,62 @@ impl TimerManager {
                         IntervalStatus::AutoAway,
                     );
                     
-                    // Hide prompt window - emit events that frontend will handle
                     println!("[TIMER] Auto-away: Recording 'Away from workspace' for interval {}", interval_id);
                     
-                    // Emit auto-away event (PromptWindow listens for this)
-                    let _ = app_clone.emit("auto-away", interval_id);
-                    
-                    // Also emit prompt-hide to ensure window closes
-                    let _ = app_clone.emit("prompt-hide", ());
-                    
-                    // Call hide command directly to ensure window closes
-                    // Note: We use try_state which returns Option, and Tauri uses async_runtime::Mutex
-                    if let Some(window_mgr_state) = app_clone.try_state::<Arc<tauri::async_runtime::Mutex<WindowManager>>>() {
-                        let window_mgr = window_mgr_state.lock().await;
-                        let _ = window_mgr.hide_prompt_window().await;
-                        println!("[TIMER] Auto-away: Called hide_prompt_window");
-                    }
-
-                    // If this was the last interval, finalize the workblock now.
-                    // (Timer loop intentionally does not complete the workblock on the last tick.)
-                    if let Ok(workblock) = get_workblock_by_id(&app_clone, interval.workblock_id) {
+                    // Check if this is the last interval BEFORE deciding what to do with the window
+                    let is_last_interval = if let Ok(workblock) = get_workblock_by_id(&app_clone, interval.workblock_id) {
                         let total_intervals = workblock.duration_minutes.unwrap_or(60) * 6; // TESTING
-                        let is_last_interval = interval.interval_number >= total_intervals;
+                        interval.interval_number >= total_intervals
+                    } else {
+                        false
+                    };
 
-                        if is_last_interval {
-                            println!(
-                                "[TIMER] Auto-away on final interval; completing workblock_id={}",
-                                interval.workblock_id
-                            );
+                    if is_last_interval {
+                        println!(
+                            "[TIMER] Auto-away on final interval; showing summary ready for workblock_id={}",
+                            interval.workblock_id
+                        );
 
-                            let _ = complete_workblock(&app_clone, interval.workblock_id);
-                            let _ = app_clone.emit("workblock-complete", interval.workblock_id);
+                        // Show summary ready instead of closing the window
+                        if let Some(window_mgr_state) = app_clone.try_state::<Arc<tauri::async_runtime::Mutex<WindowManager>>>() {
+                            let window_mgr = window_mgr_state.lock().await;
+                            let _ = window_mgr.show_summary_ready().await;
+                            println!("[TIMER] Auto-away: Called show_summary_ready");
+                        }
 
-                            // Update tray state to SummaryReady
-                            if let Some(tray_mgr_state) = app_clone.try_state::<Arc<Mutex<TrayManager>>>() {
-                                let mut tray = tray_mgr_state.lock().await;
-                                tray.update_icon_state(TrayIconState::SummaryReady).await;
-                            }
+                        // Finalize the workblock
+                        let _ = complete_workblock(&app_clone, interval.workblock_id);
+                        let _ = app_clone.emit("workblock-complete", interval.workblock_id);
 
-                            // Reset timer state
-                            let mut state = state_clone.lock().await;
-                            *state = TimerState::default();
-                            drop(state);
+                        // Update tray state to SummaryReady
+                        if let Some(tray_mgr_state) = app_clone.try_state::<Arc<Mutex<TrayManager>>>() {
+                            let mut tray = tray_mgr_state.lock().await;
+                            tray.update_icon_state(TrayIconState::SummaryReady).await;
+                        }
 
-                            // Stop interval ticking task if it still exists
-                            if let Some(h) = interval_handle_clone.lock().await.take() {
-                                h.abort();
-                            }
+                        // Reset timer state
+                        let mut state = state_clone.lock().await;
+                        *state = TimerState::default();
+                        drop(state);
+
+                        // Stop interval ticking task if it still exists
+                        if let Some(h) = interval_handle_clone.lock().await.take() {
+                            h.abort();
+                        }
+                    } else {
+                        // Not the last interval - close the window as usual
+                        // Emit auto-away event (PromptWindow listens for this)
+                        let _ = app_clone.emit("auto-away", interval_id);
+                        
+                        // Also emit prompt-hide to ensure window closes
+                        let _ = app_clone.emit("prompt-hide", ());
+                        
+                        // Call hide command directly to ensure window closes
+                        // Note: We use try_state which returns Option, and Tauri uses async_runtime::Mutex
+                        if let Some(window_mgr_state) = app_clone.try_state::<Arc<tauri::async_runtime::Mutex<WindowManager>>>() {
+                            let window_mgr = window_mgr_state.lock().await;
+                            let _ = window_mgr.hide_prompt_window().await;
+                            println!("[TIMER] Auto-away: Called hide_prompt_window");
                         }
                     }
                 }
