@@ -51,15 +51,7 @@ export default function PromptPage() {
     }, []);
 
     return (
-        <div
-            style={{
-                width: "100vw",
-                height: "100vh",
-                margin: 0,
-                padding: 0,
-                backgroundColor: "transparent",
-            }}
-        >
+        <div className="prompt-window-root">
             <PromptWindow intervalId={intervalId} />
         </div>
     );

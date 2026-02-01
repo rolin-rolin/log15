@@ -210,7 +210,7 @@ impl WindowManager {
             WebviewUrl::App(url.into()),
         )
         .title("Log15 - Summary Ready")
-        .inner_size(300.0, 180.0)
+        .inner_size(300.0, 240.0)
         .decorations(false)
         .always_on_top(true)
         .skip_taskbar(true)
@@ -234,7 +234,7 @@ impl WindowManager {
                 let logical_height = screen_size.height as f64 / scale_factor;
                 
                 let window_width = 300.0;
-                let window_height = 180.0;
+                let window_height = 240.0;
                 
                 let x = logical_width - window_width - 20.0;
                 let y = 20.0;

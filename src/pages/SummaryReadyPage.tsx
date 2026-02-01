@@ -12,15 +12,7 @@ export default function SummaryReadyPage() {
     };
 
     return (
-        <div
-            style={{
-                width: "100vw",
-                height: "100vh",
-                margin: 0,
-                padding: 0,
-                backgroundColor: "transparent",
-            }}
-        >
+        <div className="prompt-window-root">
             <div className="prompt-container fade-in">
                 <div className="summary-ready-content">
                     <div className="summary-icon">📊</div>
