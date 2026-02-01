@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import PromptPage from "./pages/PromptPage";
+import SummaryReadyPage from "./pages/SummaryReadyPage";
 import WorkblockControl from "./components/WorkblockControl";
 import SummaryView from "./components/SummaryView";
 import ArchiveView from "./components/ArchiveView";
@@ -27,8 +28,15 @@ function App() {
                 console.log("[APP] Window type check - label:", label, "hash:", window.location.hash);
 
                 if (label === "prompt") {
-                    console.log("[APP] Detected prompt window via label, switching to prompt view");
-                    setCurrentView("prompt");
+                    // Check if it's summary-ready or prompt
+                    const hash = window.location.hash;
+                    if (hash.includes("summary-ready")) {
+                        console.log("[APP] Detected summary-ready window via label");
+                        setCurrentView("summary-ready");
+                    } else {
+                        console.log("[APP] Detected prompt window via label, switching to prompt view");
+                        setCurrentView("prompt");
+                    }
                     return;
                 }
             } catch (error) {
@@ -37,9 +45,14 @@ function App() {
 
             // Fallback: check hash
             const hash = window.location.hash;
-            if (hash === "#/prompt" || hash === "/prompt") {
+            if (hash === "#/prompt" || hash === "/prompt" || hash.startsWith("#/prompt") || hash.startsWith("/prompt")) {
                 console.log("[APP] Detected prompt window via hash");
                 setCurrentView("prompt");
+                return;
+            }
+            if (hash === "#/summary-ready" || hash === "/summary-ready" || hash.startsWith("#/summary-ready") || hash.startsWith("/summary-ready")) {
+                console.log("[APP] Detected summary-ready window via hash");
+                setCurrentView("summary-ready");
                 return;
             }
 
@@ -118,6 +131,10 @@ function App() {
 
     if (currentView === "prompt") {
         return <PromptPage />;
+    }
+
+    if (currentView === "summary-ready") {
+        return <SummaryReadyPage />;
     }
 
     if (currentView === "summary") {

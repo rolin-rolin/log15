@@ -13,7 +13,6 @@ export default function PromptWindow({ intervalId }: PromptWindowProps) {
     const [words, setWords] = useState("");
     const [showCheckmark, setShowCheckmark] = useState(false);
     const [isVisible, setIsVisible] = useState(false);
-    const [showSummaryReady, setShowSummaryReady] = useState(false);
     const showCheckmarkRef = useRef(false);
     const intervalIdRef = useRef<number | null>(null);
 
@@ -26,7 +25,6 @@ export default function PromptWindow({ intervalId }: PromptWindowProps) {
             // Reset state when new interval comes in
             setShowCheckmark(false);
             showCheckmarkRef.current = false;
-            setShowSummaryReady(false);
             setWords("");
         }
     }, [intervalId]);
@@ -37,6 +35,9 @@ export default function PromptWindow({ intervalId }: PromptWindowProps) {
     }, [showCheckmark]);
 
     useEffect(() => {
+        // #region agent log
+        fetch('http://127.0.0.1:7243/ingest/e1aff560-78fd-4480-b3b6-3bd988b7d39c',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'PromptWindow.tsx:39','message':'Setting up event listeners',data:{intervalId:intervalId},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
+        // #endregion
         // Listen for hide event
         const unlisten = listen("prompt-hide", () => {
             console.log("[PROMPT_WINDOW] Received prompt-hide event");
@@ -51,22 +52,7 @@ export default function PromptWindow({ intervalId }: PromptWindowProps) {
             invoke("hide_prompt_window_cmd").catch(console.error);
         });
 
-        // Listen for show summary ready event
-        const unlistenSummary = listen("show-summary-ready", () => {
-            // If checkmark is showing, wait for it to fade before showing summary
-            if (showCheckmarkRef.current) {
-                setTimeout(() => {
-                    setShowSummaryReady(true);
-                    setShowCheckmark(false);
-                    setWords("");
-                }, CHECKMARK_DURATION_MS);
-            } else {
-                // If no checkmark, show summary immediately
-                setShowSummaryReady(true);
-                setShowCheckmark(false);
-                setWords("");
-            }
-        });
+        // No longer need to listen for show-summary-ready - backend closes and reopens window
 
         // Listen for close summary event
         const unlistenClose = listen("close-summary", () => {
@@ -76,7 +62,6 @@ export default function PromptWindow({ intervalId }: PromptWindowProps) {
         return () => {
             unlisten.then((fn) => fn());
             unlistenAutoAway.then((fn) => fn());
-            unlistenSummary.then((fn) => fn());
             unlistenClose.then((fn) => fn());
         };
     }, []);
@@ -101,34 +86,19 @@ export default function PromptWindow({ intervalId }: PromptWindowProps) {
 
         // Submit words
         try {
-            const result = await invoke<{ is_last_interval: boolean }>("submit_interval_words", {
+            await invoke<{ is_last_interval: boolean }>("submit_interval_words", {
                 intervalId: intervalId,
                 words: words.trim(),
             });
 
-            // If this is the last interval, show summary ready after checkmark duration
-            if (result.is_last_interval) {
-                setTimeout(() => {
-                    setShowSummaryReady(true);
-                    setShowCheckmark(false);
-                }, CHECKMARK_DURATION_MS);
-            } else {
-                // For non-last intervals, close window after checkmark duration
-                setTimeout(() => {
-                    invoke("hide_prompt_window_cmd").catch(console.error);
-                }, CHECKMARK_DURATION_MS);
-            }
+            // For all intervals (including last), close window after checkmark duration
+            // For last interval, backend will open summary-ready window
+            setTimeout(() => {
+                invoke("hide_prompt_window_cmd").catch(console.error);
+            }, CHECKMARK_DURATION_MS);
         } catch (error) {
             console.error("Failed to submit words:", error);
             setShowCheckmark(false);
-        }
-    };
-
-    const handleCloseSummary = async () => {
-        try {
-            await invoke("hide_prompt_window_cmd");
-        } catch (error) {
-            console.error("Failed to close summary window:", error);
         }
     };
 
@@ -140,16 +110,7 @@ export default function PromptWindow({ intervalId }: PromptWindowProps) {
 
     return (
         <div className={`prompt-container ${isVisible ? "fade-in" : "fade-out"}`}>
-            {showSummaryReady ? (
-                <div className="summary-ready-content">
-                    <div className="summary-icon">📊</div>
-                    <h3 className="summary-title">Summary Ready!</h3>
-                    <p className="summary-message">Your workblock summary is ready to view.</p>
-                    <button onClick={handleCloseSummary} className="close-summary-button">
-                        Close
-                    </button>
-                </div>
-            ) : showCheckmark ? (
+            {showCheckmark ? (
                 <div className="checkmark-container">
                     <div className="checkmark"></div>
                 </div>

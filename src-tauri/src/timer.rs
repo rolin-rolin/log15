@@ -262,11 +262,29 @@ impl TimerManager {
         let interval_handle_clone = Arc::clone(&self.interval_handle);
         
         let handle = tokio::spawn(async move {
+            // #region agent log
+            use std::fs::OpenOptions;
+            use std::io::Write;
+            if let Ok(mut file) = OpenOptions::new().create(true).append(true).open("/Users/ronaldlin/log15/.cursor/debug.log") {
+                let _ = writeln!(file, r#"{{"location":"timer.rs:264","message":"Auto-away timer started","data":{{"interval_id":{},"timestamp":{}}},"timestamp":{},"sessionId":"debug-session","runId":"run1","hypothesisId":"A"}}"#, interval_id, chrono::Utc::now().timestamp_millis(), chrono::Utc::now().timestamp_millis());
+            }
+            // #endregion
             // TESTING: 5 seconds instead of 10 minutes
             tokio::time::sleep(Duration::from_secs(5)).await; // TESTING: Changed from 10 * 60
             
+            // #region agent log
+            if let Ok(mut file) = OpenOptions::new().create(true).append(true).open("/Users/ronaldlin/log15/.cursor/debug.log") {
+                let _ = writeln!(file, r#"{{"location":"timer.rs:270","message":"Auto-away timer expired","data":{{"interval_id":{},"timestamp":{}}},"timestamp":{},"sessionId":"debug-session","runId":"run1","hypothesisId":"A"}}"#, interval_id, chrono::Utc::now().timestamp_millis(), chrono::Utc::now().timestamp_millis());
+            }
+            // #endregion
+            
             // Check if the specific interval still has no recorded words
             if let Ok(interval) = get_interval_by_id(&app_clone, interval_id) {
+                // #region agent log
+                if let Ok(mut file) = OpenOptions::new().create(true).append(true).open("/Users/ronaldlin/log15/.cursor/debug.log") {
+                    let _ = writeln!(file, r#"{{"location":"timer.rs:275","message":"Interval retrieved","data":{{"interval_id":{},"interval_number":{},"workblock_id":{},"has_words":{},"timestamp":{}}},"timestamp":{},"sessionId":"debug-session","runId":"run1","hypothesisId":"A"}}"#, interval_id, interval.interval_number, interval.workblock_id, interval.words.is_some(), chrono::Utc::now().timestamp_millis(), chrono::Utc::now().timestamp_millis());
+                }
+                // #endregion
                 if interval.words.is_none() {
                     // Auto-away: record "Away from workspace"
                     let _ = update_interval_words(
@@ -281,8 +299,19 @@ impl TimerManager {
                     // Check if this is the last interval BEFORE deciding what to do with the window
                     let is_last_interval = if let Ok(workblock) = get_workblock_by_id(&app_clone, interval.workblock_id) {
                         let total_intervals = workblock.duration_minutes.unwrap_or(60) * 6; // TESTING
-                        interval.interval_number >= total_intervals
+                        let result = interval.interval_number >= total_intervals;
+                        // #region agent log
+                        if let Ok(mut file) = OpenOptions::new().create(true).append(true).open("/Users/ronaldlin/log15/.cursor/debug.log") {
+                            let _ = writeln!(file, r#"{{"location":"timer.rs:287","message":"Last interval check","data":{{"interval_number":{},"total_intervals":{},"is_last_interval":{},"workblock_id":{},"timestamp":{}}},"timestamp":{},"sessionId":"debug-session","runId":"run1","hypothesisId":"B"}}"#, interval.interval_number, total_intervals, result, interval.workblock_id, chrono::Utc::now().timestamp_millis(), chrono::Utc::now().timestamp_millis());
+                        }
+                        // #endregion
+                        result
                     } else {
+                        // #region agent log
+                        if let Ok(mut file) = OpenOptions::new().create(true).append(true).open("/Users/ronaldlin/log15/.cursor/debug.log") {
+                            let _ = writeln!(file, r#"{{"location":"timer.rs:290","message":"Failed to get workblock","data":{{"workblock_id":{},"timestamp":{}}},"timestamp":{},"sessionId":"debug-session","runId":"run1","hypothesisId":"B"}}"#, interval.workblock_id, chrono::Utc::now().timestamp_millis(), chrono::Utc::now().timestamp_millis());
+                        }
+                        // #endregion
                         false
                     };
 
@@ -292,11 +321,33 @@ impl TimerManager {
                             interval.workblock_id
                         );
 
+                        // #region agent log
+                        if let Ok(mut file) = OpenOptions::new().create(true).append(true).open("/Users/ronaldlin/log15/.cursor/debug.log") {
+                            let _ = writeln!(file, r#"{{"location":"timer.rs:297","message":"Entering last interval branch","data":{{"workblock_id":{},"timestamp":{}}},"timestamp":{},"sessionId":"debug-session","runId":"run1","hypothesisId":"C"}}"#, interval.workblock_id, chrono::Utc::now().timestamp_millis(), chrono::Utc::now().timestamp_millis());
+                        }
+                        // #endregion
+
                         // Show summary ready instead of closing the window
                         if let Some(window_mgr_state) = app_clone.try_state::<Arc<tauri::async_runtime::Mutex<WindowManager>>>() {
+                            // #region agent log
+                            if let Ok(mut file) = OpenOptions::new().create(true).append(true).open("/Users/ronaldlin/log15/.cursor/debug.log") {
+                                let _ = writeln!(file, r#"{{"location":"timer.rs:303","message":"Window manager state found","data":{{"timestamp":{}}},"timestamp":{},"sessionId":"debug-session","runId":"run1","hypothesisId":"C"}}"#, chrono::Utc::now().timestamp_millis(), chrono::Utc::now().timestamp_millis());
+                            }
+                            // #endregion
                             let window_mgr = window_mgr_state.lock().await;
-                            let _ = window_mgr.show_summary_ready().await;
+                            let result = window_mgr.show_summary_ready().await;
+                            // #region agent log
+                            if let Ok(mut file) = OpenOptions::new().create(true).append(true).open("/Users/ronaldlin/log15/.cursor/debug.log") {
+                                let _ = writeln!(file, r#"{{"location":"timer.rs:307","message":"show_summary_ready result","data":{{"success":{},"error":"{}","timestamp":{}}},"timestamp":{},"sessionId":"debug-session","runId":"run1","hypothesisId":"C"}}"#, result.is_ok(), result.as_ref().err().map(|e| e.to_string()).unwrap_or_default(), chrono::Utc::now().timestamp_millis(), chrono::Utc::now().timestamp_millis());
+                            }
+                            // #endregion
                             println!("[TIMER] Auto-away: Called show_summary_ready");
+                        } else {
+                            // #region agent log
+                            if let Ok(mut file) = OpenOptions::new().create(true).append(true).open("/Users/ronaldlin/log15/.cursor/debug.log") {
+                                let _ = writeln!(file, r#"{{"location":"timer.rs:312","message":"Window manager state NOT found","data":{{"timestamp":{}}},"timestamp":{},"sessionId":"debug-session","runId":"run1","hypothesisId":"C"}}"#, chrono::Utc::now().timestamp_millis(), chrono::Utc::now().timestamp_millis());
+                            }
+                            // #endregion
                         }
 
                         // Finalize the workblock
@@ -319,6 +370,11 @@ impl TimerManager {
                             h.abort();
                         }
                     } else {
+                        // #region agent log
+                        if let Ok(mut file) = OpenOptions::new().create(true).append(true).open("/Users/ronaldlin/log15/.cursor/debug.log") {
+                            let _ = writeln!(file, r#"{{"location":"timer.rs:336","message":"Not last interval - closing window","data":{{"timestamp":{}}},"timestamp":{},"sessionId":"debug-session","runId":"run1","hypothesisId":"D"}}"#, chrono::Utc::now().timestamp_millis(), chrono::Utc::now().timestamp_millis());
+                        }
+                        // #endregion
                         // Not the last interval - close the window as usual
                         // Emit auto-away event (PromptWindow listens for this)
                         let _ = app_clone.emit("auto-away", interval_id);
@@ -334,7 +390,19 @@ impl TimerManager {
                             println!("[TIMER] Auto-away: Called hide_prompt_window");
                         }
                     }
+                } else {
+                    // #region agent log
+                    if let Ok(mut file) = OpenOptions::new().create(true).append(true).open("/Users/ronaldlin/log15/.cursor/debug.log") {
+                        let _ = writeln!(file, r#"{{"location":"timer.rs:352","message":"Interval already has words - skipping auto-away","data":{{"interval_id":{},"timestamp":{}}},"timestamp":{},"sessionId":"debug-session","runId":"run1","hypothesisId":"A"}}"#, interval_id, chrono::Utc::now().timestamp_millis(), chrono::Utc::now().timestamp_millis());
+                    }
+                    // #endregion
                 }
+            } else {
+                // #region agent log
+                if let Ok(mut file) = OpenOptions::new().create(true).append(true).open("/Users/ronaldlin/log15/.cursor/debug.log") {
+                    let _ = writeln!(file, r#"{{"location":"timer.rs:358","message":"Failed to get interval by ID","data":{{"interval_id":{},"timestamp":{}}},"timestamp":{},"sessionId":"debug-session","runId":"run1","hypothesisId":"A"}}"#, interval_id, chrono::Utc::now().timestamp_millis(), chrono::Utc::now().timestamp_millis());
+                }
+                // #endregion
             }
         });
         

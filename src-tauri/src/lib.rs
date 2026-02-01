@@ -152,24 +152,32 @@ async fn submit_interval_words(
     // If this interval's number equals total_intervals, it's the last one
     let is_last_interval = interval.interval_number >= total_intervals;
     
-    let window_manager = app.state::<Arc<Mutex<WindowManager>>>();
-    let window_mgr = window_manager.lock().await;
-    
     if is_last_interval {
-        // Show summary ready view instead of hiding
-        window_mgr.show_summary_ready().await.map_err(|e| e.to_string())?;
+        // For last interval, close the window and open summary-ready window
+        // Wait for checkmark animation (2 seconds) before showing summary
+        let app_clone = app.clone();
         
-        // Update tray state to SummaryReady
-        let tray_manager = app.state::<Arc<Mutex<TrayManager>>>();
-        let mut tray = tray_manager.lock().await;
-        tray.update_icon_state(crate::tray::TrayIconState::SummaryReady).await;
-        drop(tray);
+        async_runtime::spawn(async move {
+            // Wait for checkmark animation to complete (2 seconds)
+            tokio::time::sleep(tokio::time::Duration::from_millis(2000)).await;
+            
+            // Close prompt window and open summary-ready window
+            let window_manager = app_clone.state::<Arc<Mutex<WindowManager>>>();
+            let window_mgr = window_manager.lock().await;
+            let _ = window_mgr.show_summary_ready().await;
+            drop(window_mgr);
+            
+            // Update tray state to SummaryReady
+            let tray_manager = app_clone.state::<Arc<Mutex<TrayManager>>>();
+            let mut tray = tray_manager.lock().await;
+            tray.update_icon_state(crate::tray::TrayIconState::SummaryReady).await;
+            drop(tray);
 
-        // Finalize the workblock ONLY after the last interval is recorded.
-        // (Timer loop intentionally does not complete the workblock on the last tick.)
-        let timer_manager = app.state::<Arc<Mutex<TimerManager>>>();
-        let timer = timer_manager.lock().await;
-        timer.complete_workblock(workblock_id).await.ok();
+            // Finalize the workblock
+            let timer_manager = app_clone.state::<Arc<Mutex<TimerManager>>>();
+            let timer = timer_manager.lock().await;
+            let _ = timer.complete_workblock(workblock_id).await;
+        });
     } else {
         // #region agent log
         use std::fs::OpenOptions;
@@ -181,7 +189,6 @@ async fn submit_interval_words(
         // Don't hide window here - let frontend handle closing after checkmark animation completes
         // Frontend will call hide_prompt_window_cmd after the 2-second checkmark display
     }
-    drop(window_mgr);
     
     Ok(serde_json::json!({
         "interval": interval,

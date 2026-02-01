@@ -166,19 +166,97 @@ impl WindowManager {
         Ok(())
     }
 
-    /// Show summary ready view (transitions from prompt to summary)
+    /// Show summary ready view (closes prompt window and opens summary-ready window)
     pub async fn show_summary_ready(&self) -> Result<(), String> {
-        let prompt = self.prompt_window.lock().await;
-        
-        if let Some(window) = prompt.as_ref() {
-            // Set summary ready state
-            *self.is_summary_ready.lock().await = true;
-            
-            // Emit event to show summary view
-            window
-                .emit("show-summary-ready", ())
-                .map_err(|e| format!("Failed to emit show-summary event: {}", e))?;
+        // #region agent log
+        use std::fs::OpenOptions;
+        use std::io::Write;
+        if let Ok(mut file) = OpenOptions::new().create(true).append(true).open("/Users/ronaldlin/log15/.cursor/debug.log") {
+            let _ = writeln!(file, r#"{{"location":"window_manager.rs:170","message":"show_summary_ready called","data":{{"timestamp":{}}},"timestamp":{},"sessionId":"debug-session","runId":"run1","hypothesisId":"C"}}"#, chrono::Utc::now().timestamp_millis(), chrono::Utc::now().timestamp_millis());
         }
+        // #endregion
+        
+        // First, close the existing prompt window
+        let mut prompt = self.prompt_window.lock().await;
+        if let Some(window) = prompt.take() {
+            println!("[WINDOW_MGR] Closing prompt window before showing summary");
+            let _ = window.close();
+        } else if let Some(window) = self.app.get_webview_window("prompt") {
+            println!("[WINDOW_MGR] Window exists in Tauri but not in state, closing it");
+            let _ = window.close();
+        }
+        drop(prompt);
+        
+        // Clear interval ID state
+        *self.current_interval_id.lock().await = None;
+        *self.is_summary_ready.lock().await = true;
+        
+        // Wait for window to close
+        tokio::time::sleep(tokio::time::Duration::from_millis(350)).await;
+        
+        // Double-check: if window still exists, try to close it again
+        if let Some(existing_window) = self.app.get_webview_window("prompt") {
+            println!("[WINDOW_MGR] Window still exists after close, force closing");
+            let _ = existing_window.close();
+            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+        }
+        
+        // Create a new window with summary-ready route
+        println!("[WINDOW_MGR] Creating summary-ready window");
+        let url = "index.html#/summary-ready";
+        let window = WebviewWindowBuilder::new(
+            &self.app,
+            "prompt",
+            WebviewUrl::App(url.into()),
+        )
+        .title("Log15 - Summary Ready")
+        .inner_size(300.0, 180.0)
+        .decorations(false)
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .visible(true)
+        .build()
+        .map_err(|e| {
+            eprintln!("[WINDOW_MGR] Failed to create summary-ready window: {}", e);
+            format!("Failed to create summary-ready window: {}", e)
+        })?;
+        
+        println!("[WINDOW_MGR] Summary-ready window created successfully");
+        
+        // Position window at top-right of screen
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+        
+        if let Ok(monitor) = window.current_monitor() {
+            if let Some(monitor) = monitor {
+                let screen_size = monitor.size();
+                let scale_factor = monitor.scale_factor();
+                let logical_width = screen_size.width as f64 / scale_factor;
+                let logical_height = screen_size.height as f64 / scale_factor;
+                
+                let window_width = 300.0;
+                let window_height = 180.0;
+                
+                let x = logical_width - window_width - 20.0;
+                let y = 20.0;
+                
+                let pos_result = window.set_position(tauri::LogicalPosition::new(x, y));
+                match pos_result {
+                    Ok(_) => println!("[WINDOW_MGR] Summary-ready window positioned successfully"),
+                    Err(e) => eprintln!("[WINDOW_MGR] Failed to position summary-ready window: {}", e),
+                }
+            }
+        }
+        
+        window.show().map_err(|e| {
+            eprintln!("[WINDOW_MGR] Failed to show summary-ready window: {}", e);
+            format!("Failed to show summary-ready window: {}", e)
+        })?;
+        
+        window.set_focus().ok();
+        
+        // Store window in state
+        let mut prompt = self.prompt_window.lock().await;
+        *prompt = Some(window);
 
         Ok(())
     }
