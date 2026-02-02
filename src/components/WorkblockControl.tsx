@@ -12,7 +12,7 @@ export default function WorkblockControl({ onNavigateToSummary, onNavigateToArch
     const [activeWorkblock, setActiveWorkblock] = useState<Workblock | null>(null);
     const [timerState, setTimerState] = useState<TimerState | null>(null);
     const [hours, setHours] = useState<number>(1); // Default 1 hour
-    const [minutes, setMinutes] = useState<number>(0); // Default 0 minutes
+    const [minutes, setMinutes] = useState<number>(15); // Default 15 minutes (minimum)
     const [timeRemaining, setTimeRemaining] = useState<number | null>(null);
     const [loading, setLoading] = useState(false);
     const [showInfoOverlay, setShowInfoOverlay] = useState(false);
@@ -280,7 +280,7 @@ export default function WorkblockControl({ onNavigateToSummary, onNavigateToArch
                                         width: "100px",
                                     }}
                                 >
-                                    {[0, 1, 15, 30, 45].map((m) => (
+                                    {[15, 30, 45].map((m) => (
                                         <option key={m} value={m}>
                                             {m} min
                                         </option>

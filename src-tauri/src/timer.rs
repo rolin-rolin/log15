@@ -62,9 +62,8 @@ impl TimerManager {
         }
 
         // Calculate number of intervals
-        // TESTING: Calculate intervals based on 10-second intervals instead of 15-minute
-        // For testing: 1 interval per 10 seconds, so duration_minutes * 6 intervals per minute
-        let total_intervals = duration_minutes * 6; // TESTING: Changed from duration_minutes / 15
+        // Each interval is 15 minutes, so divide total duration by 15
+        let total_intervals = duration_minutes / 15;
         
         // Initialize state
         state.workblock_id = Some(workblock_id);
@@ -89,8 +88,8 @@ impl TimerManager {
         let app_clone = self.app.clone();
         
         let handle = tokio::spawn(async move {
-            // TESTING: 10 seconds instead of 15 minutes
-            let mut interval_timer = interval(Duration::from_secs(10)); // TESTING: Changed from 15 * 60
+            // Each interval is 15 minutes
+            let mut interval_timer = interval(Duration::from_secs(15 * 60));
             interval_timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
             // Consume the immediate first tick to establish the baseline "now"
@@ -269,8 +268,8 @@ impl TimerManager {
                 let _ = writeln!(file, r#"{{"location":"timer.rs:264","message":"Auto-away timer started","data":{{"interval_id":{},"timestamp":{}}},"timestamp":{},"sessionId":"debug-session","runId":"run1","hypothesisId":"A"}}"#, interval_id, chrono::Utc::now().timestamp_millis(), chrono::Utc::now().timestamp_millis());
             }
             // #endregion
-            // TESTING: 5 seconds instead of 10 minutes
-            tokio::time::sleep(Duration::from_secs(5)).await; // TESTING: Changed from 10 * 60
+            // Auto-away timer: 10 minutes
+            tokio::time::sleep(Duration::from_secs(10 * 60)).await;
             
             // #region agent log
             if let Ok(mut file) = OpenOptions::new().create(true).append(true).open("/Users/ronaldlin/log15/.cursor/debug.log") {
@@ -429,7 +428,7 @@ impl TimerManager {
         
         if let Some(start_time) = state.interval_start_time {
             let elapsed = (Local::now() - start_time).num_seconds();
-            let remaining = 10 - elapsed; // TESTING: 10 seconds (normally 15 * 60 = 900)
+            let remaining = 15 * 60 - elapsed; // 15 minutes = 900 seconds
             Some(remaining.max(0))
         } else {
             None

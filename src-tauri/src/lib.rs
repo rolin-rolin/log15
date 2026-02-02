@@ -146,9 +146,9 @@ async fn submit_interval_words(
     let workblock = get_workblock_by_id(&app, workblock_id)
         .map_err(|e| e.to_string())?;
     
-    // TESTING: Calculate based on 10-second intervals (normally 15-minute intervals)
-    // For testing: 1 interval per 10 seconds, so duration_minutes * 6 intervals per minute
-    let total_intervals = workblock.duration_minutes.unwrap_or(60) * 6; // TESTING: Changed from / 15
+    // Calculate based on 15-minute intervals
+    // Each interval is 15 minutes, so divide total duration by 15
+    let total_intervals = workblock.duration_minutes.unwrap_or(60) / 15;
     // If this interval's number equals total_intervals, it's the last one
     let is_last_interval = interval.interval_number >= total_intervals;
     
