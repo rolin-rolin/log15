@@ -199,7 +199,10 @@ export default function WorkblockControl({ onNavigateToSummary, onNavigateToArch
                         <strong>Duration:</strong> {formatDuration(activeWorkblock.duration_minutes || 0)}
                     </p>
                     <p>
-                        <strong>Started:</strong> {new Date(activeWorkblock.start_time).toLocaleTimeString()}
+                        <strong>Started:</strong> {new Date(activeWorkblock.start_time).toLocaleTimeString([], {
+                            hour: "2-digit",
+                            minute: "2-digit",
+                        })}
                     </p>
 
                     {timerState?.is_running && (
@@ -365,7 +368,7 @@ export default function WorkblockControl({ onNavigateToSummary, onNavigateToArch
                         >
                             <li>Every 15 minutes, you'll be prompted to enter 1-2 words about what you're doing</li>
                             <li>The prompt window will show up on the top right of your screen</li>
-                            <li>At the end of your workblock, you can review what you did</li>
+                            <li>At the end of your workblock, you can review what you did in your summary</li>
                             <li>If you don't respond within 10 minutes, "Away from workspace" will be auto-recorded</li>
                         </ul>
                         <div

@@ -50,11 +50,11 @@ export default function WordFrequencyChart({ wordFrequency, title = "Word Freque
                         textAnchor="end"
                         height={80}
                         interval={0}
-                        style={{ fontSize: "12px" }}
+                        style={{ fontSize: "12px", fill: "white" }}
                     />
                     <YAxis
-                        label={{ value: "Count", angle: -90, position: "insideLeft" }}
-                        style={{ fontSize: "12px" }}
+                        label={{ value: "Count", angle: -90, position: "insideLeft", style: { fill: "white" } }}
+                        style={{ fontSize: "12px", fill: "white" }}
                     />
                     <Tooltip formatter={(value: number) => [`${value} times`, "Frequency"]} />
                     <Bar dataKey="count" radius={[8, 8, 0, 0]}>

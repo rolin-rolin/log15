@@ -47,11 +47,11 @@ export default function ActivityChart({ activityData, title = "Activity Breakdow
                         textAnchor="end"
                         height={80}
                         interval={0}
-                        style={{ fontSize: "12px" }}
+                        style={{ fontSize: "12px", fill: "white" }}
                     />
                     <YAxis
-                        label={{ value: "Minutes", angle: -90, position: "insideLeft" }}
-                        style={{ fontSize: "12px" }}
+                        label={{ value: "Minutes", angle: -90, position: "insideLeft", style: { fill: "white" } }}
+                        style={{ fontSize: "12px", fill: "white" }}
                     />
                     <Tooltip
                         formatter={(value: number, name: string) => {

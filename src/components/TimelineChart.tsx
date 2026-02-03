@@ -153,9 +153,9 @@ export default function TimelineChart({ timelineData, title = "Timeline", workbl
                             minute: "2-digit",
                         });
 
-                        // If this interval is cancelled, show "cancelled" as the words
+                        // If this interval is cancelled, show "Cancelled" as the words
                         const displayWords =
-                            interval.workblock_status === "cancelled" ? "cancelled" : interval.words || "Pending";
+                            interval.workblock_status === "cancelled" ? "Cancelled" : interval.words || "Pending";
 
                         return (
                             <div
