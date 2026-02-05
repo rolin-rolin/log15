@@ -807,6 +807,20 @@ pub fn generate_workblock_visualization(
         })
         .collect();
     
+    // Calculate duration FIRST: for cancelled workblocks, count only completed intervals (exclude the cancelled interval)
+    // For example, if cancelled in the 3rd interval, only count the first 2 intervals (30 min)
+    let duration_minutes = if is_cancelled {
+        // Exclude the last interval (the one where cancellation happened)
+        // If there are intervals, subtract 1; otherwise 0
+        if intervals.len() > 0 {
+            (intervals.len() - 1) as i32 * 15
+        } else {
+            0
+        }
+    } else {
+        workblock.duration_minutes.unwrap_or(0)
+    };
+    
     // Generate activity data (group by words) - each interval is always 15 minutes
     let mut activity_map: HashMap<String, i32> = HashMap::new();
     for interval in &intervals {
@@ -819,12 +833,13 @@ pub fn generate_workblock_visualization(
         }
     }
     
-    let total_minutes: i32 = activity_map.values().sum();
+    // Calculate percentages based on workblock duration (not sum of activity minutes)
+    // Percentage = (freq_of_activity * 15 minutes) / workblock_duration
     let activity_data: Vec<ActivityData> = activity_map
         .into_iter()
         .map(|(words, minutes)| {
-            let percentage = if total_minutes > 0 {
-                (minutes as f64 / total_minutes as f64) * 100.0
+            let percentage = if duration_minutes > 0 {
+                (minutes as f64 / duration_minutes as f64) * 100.0
             } else {
                 0.0
             };
@@ -852,13 +867,6 @@ pub fn generate_workblock_visualization(
         .into_iter()
         .map(|(word, count)| WordFrequency { word, count })
         .collect();
-    
-    // Calculate duration: for cancelled workblocks, count intervals; for completed, use stored duration
-    let duration_minutes = if is_cancelled {
-        intervals.len() as i32 * 15
-    } else {
-        workblock.duration_minutes.unwrap_or(0)
-    };
     
     Ok(WorkblockVisualization {
         id: workblock_id,
@@ -892,9 +900,6 @@ pub fn generate_daily_aggregate(app: &AppHandle, date: &str) -> Result<DailyAggr
     let mut aggregate_total_minutes: i32 = 0;
     
     for workblock_viz in &workblock_visualizations {
-        // Get the workblock to access workblock_id for timeline data
-        let workblock = get_workblock_by_id(app, workblock_viz.id)?;
-        
         // Add timeline data from this workblock
         for timeline_item in &workblock_viz.timeline_data {
             all_timeline_data.push(AggregateTimelineData {
@@ -927,13 +932,13 @@ pub fn generate_daily_aggregate(app: &AppHandle, date: &str) -> Result<DailyAggr
     // Sort timeline chronologically
     all_timeline_data.sort_by(|a, b| a.start_time.cmp(&b.start_time));
     
-    // Calculate activity percentages
-    let total_minutes: i32 = activity_map.values().sum();
+    // Calculate activity percentages based on aggregate total minutes (sum of all workblock durations)
+    // Percentage = (freq_of_activity_today * 15 minutes) / sum_of_durations_of_all_workblocks
     let activity_data: Vec<ActivityData> = activity_map
         .into_iter()
         .map(|(words, minutes)| {
-            let percentage = if total_minutes > 0 {
-                (minutes as f64 / total_minutes as f64) * 100.0
+            let percentage = if aggregate_total_minutes > 0 {
+                (minutes as f64 / aggregate_total_minutes as f64) * 100.0
             } else {
                 0.0
             };
