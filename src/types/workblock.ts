@@ -71,6 +71,8 @@ export interface WordFrequency {
 
 export interface WorkblockVisualization {
     id: number;
+    duration_minutes?: number;
+    status?: "active" | "completed" | "cancelled";
     timeline_data: TimelineData[];
     activity_data: ActivityData[];
     word_frequency: WordFrequency[];

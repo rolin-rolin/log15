@@ -703,6 +703,8 @@ pub struct WordFrequency {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct WorkblockVisualization {
     pub id: i64,
+    pub duration_minutes: i32,
+    pub status: String, // "active", "completed", or "cancelled"
     pub timeline_data: Vec<TimelineData>,
     pub activity_data: Vec<ActivityData>,
     pub word_frequency: Vec<WordFrequency>,
@@ -780,17 +782,12 @@ pub fn generate_workblock_visualization(
         None
     };
     
-    // Generate timeline data
+    // Generate timeline data - each interval always represents 15 minutes
     let timeline_data: Vec<TimelineData> = intervals
         .iter()
         .map(|interval| {
-            let duration = if let Some(end_time) = &interval.end_time {
-                let start = DateTime::parse_from_rfc3339(&interval.start_time).unwrap();
-                let end = DateTime::parse_from_rfc3339(end_time).unwrap();
-                (end - start).num_minutes() as i32
-            } else {
-                15 // Default 15 minutes if not ended
-            };
+            // Each interval always represents 15 minutes, regardless of when words were recorded
+            let duration = 15;
             
             // Only mark as cancelled if this is the last interval and workblock is cancelled
             let status = if is_cancelled && last_interval_number == Some(interval.interval_number) {
@@ -810,20 +807,14 @@ pub fn generate_workblock_visualization(
         })
         .collect();
     
-    // Generate activity data (group by words) - only from intervals that were actually used
+    // Generate activity data (group by words) - each interval is always 15 minutes
     let mut activity_map: HashMap<String, i32> = HashMap::new();
     for interval in &intervals {
         if let Some(words) = &interval.words {
             let words_lower = words.to_lowercase().trim().to_string();
             if !words_lower.is_empty() {
-                let duration = if let Some(end_time) = &interval.end_time {
-                    let start = DateTime::parse_from_rfc3339(&interval.start_time).unwrap_or_default();
-                    let end = DateTime::parse_from_rfc3339(end_time).unwrap_or_default();
-                    (end - start).num_minutes() as i32
-                } else {
-                    15 // Default 15 minutes if not ended
-                };
-                *activity_map.entry(words_lower).or_insert(0) += duration;
+                // Each interval always represents 15 minutes, regardless of when words were recorded
+                *activity_map.entry(words_lower).or_insert(0) += 15;
             }
         }
     }
@@ -862,8 +853,17 @@ pub fn generate_workblock_visualization(
         .map(|(word, count)| WordFrequency { word, count })
         .collect();
     
+    // Calculate duration: for cancelled workblocks, count intervals; for completed, use stored duration
+    let duration_minutes = if is_cancelled {
+        intervals.len() as i32 * 15
+    } else {
+        workblock.duration_minutes.unwrap_or(0)
+    };
+    
     Ok(WorkblockVisualization {
         id: workblock_id,
+        duration_minutes,
+        status: workblock.status.as_str().to_string(),
         timeline_data,
         activity_data,
         word_frequency,
@@ -871,87 +871,57 @@ pub fn generate_workblock_visualization(
 }
 
 /// Generate daily aggregate visualization data
+/// Builds from individual workblock visualizations
 pub fn generate_daily_aggregate(app: &AppHandle, date: &str) -> Result<DailyAggregate> {
     let workblocks = get_workblocks_by_date(app, date)?;
     
+    // First, generate visualization for each workblock
+    let mut workblock_visualizations: Vec<WorkblockVisualization> = Vec::new();
+    for workblock in &workblocks {
+        if let Some(id) = workblock.id {
+            if let Ok(viz) = generate_workblock_visualization(app, id) {
+                workblock_visualizations.push(viz);
+            }
+        }
+    }
+    
+    // Now aggregate data from all workblock visualizations
     let mut all_timeline_data: Vec<AggregateTimelineData> = Vec::new();
     let mut activity_map: HashMap<String, i32> = HashMap::new();
     let mut word_freq_map: HashMap<String, i32> = HashMap::new();
+    let mut aggregate_total_minutes: i32 = 0;
     
-    for workblock in &workblocks {
-        let mut intervals = get_intervals_by_workblock(app, workblock.id.unwrap())?;
-        let is_cancelled = workblock.status == WorkblockStatus::Cancelled;
+    for workblock_viz in &workblock_visualizations {
+        // Get the workblock to access workblock_id for timeline data
+        let workblock = get_workblock_by_id(app, workblock_viz.id)?;
         
-        // If cancelled, filter out intervals that start after cancellation time
-        let cancellation_end_time = if is_cancelled {
-            workblock.end_time.as_ref().and_then(|et| {
-                DateTime::parse_from_rfc3339(et).ok()
-            })
-        } else {
-            None
-        };
-        
-        if let Some(cancel_time) = cancellation_end_time {
-            // Filter out intervals that start after cancellation
-            intervals.retain(|interval| {
-                if let Ok(start_time) = DateTime::parse_from_rfc3339(&interval.start_time) {
-                    start_time <= cancel_time
-                } else {
-                    true // Keep if we can't parse (shouldn't happen)
-                }
-            });
-        }
-        
-        // Find the last interval number to mark as cancelled (only for cancelled workblocks)
-        let last_interval_number = if is_cancelled && !intervals.is_empty() {
-            intervals.iter().map(|i| i.interval_number).max()
-        } else {
-            None
-        };
-        
-        // Add to timeline
-        for interval in &intervals {
-            let duration = if let Some(end_time) = &interval.end_time {
-                let start = DateTime::parse_from_rfc3339(&interval.start_time).unwrap();
-                let end = DateTime::parse_from_rfc3339(end_time).unwrap();
-                (end - start).num_minutes() as i32
-            } else {
-                15
-            };
-            
-            // Only mark as cancelled if this is the last interval and workblock is cancelled
-            let status = if is_cancelled && last_interval_number == Some(interval.interval_number) {
-                Some("cancelled".to_string())
-            } else {
-                None
-            };
-            
+        // Add timeline data from this workblock
+        for timeline_item in &workblock_viz.timeline_data {
             all_timeline_data.push(AggregateTimelineData {
-                workblock_id: workblock.id.unwrap(),
-                interval_number: interval.interval_number,
-                start_time: interval.start_time.clone(),
-                end_time: interval.end_time.clone(),
-                words: interval.words.clone(),
-                duration_minutes: duration,
-                workblock_status: status,
+                workblock_id: workblock_viz.id,
+                interval_number: timeline_item.interval_number,
+                start_time: timeline_item.start_time.clone(),
+                end_time: timeline_item.end_time.clone(),
+                words: timeline_item.words.clone(),
+                duration_minutes: timeline_item.duration_minutes,
+                workblock_status: timeline_item.workblock_status.clone(),
             });
-            
-            // Add to activity map - only count duration that was actually used
-            if let Some(words) = &interval.words {
-                let words_lower = words.to_lowercase().trim().to_string();
-                if !words_lower.is_empty() {
-                    *activity_map.entry(words_lower).or_insert(0) += duration;
-                }
-            }
-            
-            // Add to activity frequency (count entire phrase as one activity)
-            if let Some(words) = &interval.words {
-                let words_lower = words.to_lowercase().trim().to_string();
-                if !words_lower.is_empty() {
-                    *word_freq_map.entry(words_lower).or_insert(0) += 1;
-                }
-            }
         }
+        
+        // Aggregate activity data
+        for activity in &workblock_viz.activity_data {
+            let words_lower = activity.words.to_lowercase().trim().to_string();
+            *activity_map.entry(words_lower).or_insert(0) += activity.total_minutes;
+        }
+        
+        // Aggregate word frequency
+        for word_freq in &workblock_viz.word_frequency {
+            let word_lower = word_freq.word.to_lowercase().trim().to_string();
+            *word_freq_map.entry(word_lower).or_insert(0) += word_freq.count;
+        }
+        
+        // Sum up workblock durations
+        aggregate_total_minutes += workblock_viz.duration_minutes;
     }
     
     // Sort timeline chronologically
@@ -980,13 +950,8 @@ pub fn generate_daily_aggregate(app: &AppHandle, date: &str) -> Result<DailyAggr
         .map(|(word, count)| WordFrequency { word, count })
         .collect();
     
+    // Count workblocks and generate boundaries
     let total_workblocks = workblocks.len() as i32;
-    let aggregate_total_minutes: i32 = workblocks
-        .iter()
-        .map(|wb| wb.duration_minutes.unwrap_or(0))
-        .sum();
-    
-    // Generate workblock boundaries (sorted by start_time to match chronological order)
     let mut workblock_boundaries: Vec<WorkblockBoundary> = workblocks
         .iter()
         .map(|wb| WorkblockBoundary {

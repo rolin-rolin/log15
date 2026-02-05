@@ -1,10 +1,7 @@
 import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type {
-    Workblock,
     DailyVisualizationData,
-    WorkblockVisualization,
-    DailyAggregate,
     DailyArchive,
 } from "../types/workblock";
 import TimelineChart from "./TimelineChart";
@@ -20,7 +17,6 @@ interface SummaryViewProps {
 export default function SummaryView({ onBack, date }: SummaryViewProps) {
     const [activeTab, setActiveTab] = useState<string>("aggregate");
     const [vizData, setVizData] = useState<DailyVisualizationData | null>(null);
-    const [workblocks, setWorkblocks] = useState<Workblock[]>([]);
     const [archivedData, setArchivedData] = useState<DailyArchive | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
@@ -47,25 +43,17 @@ export default function SummaryView({ onBack, date }: SummaryViewProps) {
                 const parsed = JSON.parse(archive.visualization_data) as DailyVisualizationData;
                 setVizData(parsed);
 
-                // Workblocks are already in the visualization data
-                setWorkblocks(
-                    parsed.workblocks.map((wb) => ({
-                        id: wb.id,
-                        date: targetDate,
-                        status: "completed" as const,
-                        is_archived: true,
-                    })) as Workblock[]
-                );
             } else {
                 // Load current day data
                 setIsArchived(false);
                 const vizDataJson = await invoke<string>("get_daily_visualization_data_cmd", { date: targetDate });
                 const parsed = JSON.parse(vizDataJson) as DailyVisualizationData;
+                console.log("[SummaryView] Loaded visualization data:", {
+                    workblocksCount: parsed.workblocks.length,
+                    workblockIds: parsed.workblocks.map(wb => wb.id),
+                    hasAggregate: parsed.daily_aggregate.total_workblocks > 0
+                });
                 setVizData(parsed);
-
-                // Get workblocks for the date
-                const wbs = await invoke<Workblock[]>("get_workblocks_by_date_cmd", { date: targetDate });
-                setWorkblocks(wbs.filter((wb) => wb.status !== "cancelled"));
 
                 // Set active tab to first workblock if aggregate is empty
                 if (parsed.workblocks.length > 0 && parsed.daily_aggregate.total_workblocks === 0) {
@@ -149,15 +137,12 @@ export default function SummaryView({ onBack, date }: SummaryViewProps) {
                 {isArchived && <span className="archived-badge">Archived</span>}
             </div>
 
-            {hasAggregate && (
+            {/* Show stats based on active tab */}
+            {activeTab === "aggregate" && hasAggregate && (
                 <div className="summary-stats">
                     <div className="stat-item">
                         <div className="stat-value">{vizData.daily_aggregate.total_workblocks}</div>
                         <div className="stat-label">Workblocks</div>
-                    </div>
-                    <div className="stat-item">
-                        <div className="stat-value">{vizData.daily_aggregate.total_minutes}</div>
-                        <div className="stat-label">Total Minutes</div>
                     </div>
                     <div className="stat-item">
                         <div className="stat-value">
@@ -168,6 +153,44 @@ export default function SummaryView({ onBack, date }: SummaryViewProps) {
                     </div>
                 </div>
             )}
+            
+            {activeTab.startsWith("workblock-") && vizData && vizData.workblocks && (() => {
+                const workblockId = parseInt(activeTab.replace("workblock-", ""));
+                const workblock = vizData.workblocks.find((wb) => {
+                    const wbId = typeof wb.id === 'string' ? parseInt(wb.id, 10) : wb.id;
+                    return wbId === workblockId;
+                });
+                
+                if (!workblock) return null;
+                
+                const formatDuration = (minutes: number | undefined) => {
+                    if (minutes === undefined || minutes === null) return "0m";
+                    const hours = Math.floor(minutes / 60);
+                    const mins = minutes % 60;
+                    if (hours > 0) {
+                        return `${hours}h ${mins}m`;
+                    }
+                    return `${mins}m`;
+                };
+                
+                const formatStatus = (status: string | undefined) => {
+                    if (!status) return "Unknown";
+                    return status.charAt(0).toUpperCase() + status.slice(1);
+                };
+                
+                return (
+                    <div className="summary-stats">
+                        <div className="stat-item">
+                            <div className="stat-value">{formatDuration(workblock?.duration_minutes)}</div>
+                            <div className="stat-label">Duration</div>
+                        </div>
+                        <div className="stat-item">
+                            <div className="stat-value">{formatStatus(workblock?.status)}</div>
+                            <div className="stat-label">Status</div>
+                        </div>
+                    </div>
+                );
+            })()}
 
             {hasWorkblocks && (
                 <div className="tabs-container">
@@ -208,34 +231,83 @@ export default function SummaryView({ onBack, date }: SummaryViewProps) {
                             title="Daily Word Frequency"
                         />
                     </div>
-                ) : hasWorkblocks ? (
+                ) : activeTab.startsWith("workblock-") ? (
                     (() => {
-                        const workblockId = parseInt(activeTab.replace("workblock-", ""));
-                        const workblockIndex = vizData.workblocks.findIndex((wb) => wb.id === workblockId);
+                        if (!vizData || !vizData.workblocks) {
+                            console.error("[SummaryView] No vizData or workblocks available");
+                            return (
+                                <div style={{ padding: "20px", textAlign: "center", color: "#666" }}>
+                                    <p>No visualization data available</p>
+                                </div>
+                            );
+                        }
+
+                        const workblockIdStr = activeTab.replace("workblock-", "");
+                        const workblockId = parseInt(workblockIdStr, 10);
+                        
+                        console.log("[SummaryView] Rendering workblock view:", {
+                            activeTab,
+                            workblockIdStr,
+                            workblockId,
+                            workblocksCount: vizData.workblocks.length,
+                            workblockIds: vizData.workblocks.map(wb => ({ id: wb.id, type: typeof wb.id }))
+                        });
+                        
+                        if (isNaN(workblockId)) {
+                            return (
+                                <div style={{ padding: "20px", textAlign: "center", color: "#666" }}>
+                                    <p>Invalid workblock ID: {workblockIdStr}</p>
+                                </div>
+                            );
+                        }
+                        
+                        const workblockIndex = vizData.workblocks.findIndex((wb) => {
+                            // Handle both number and string IDs
+                            const wbId = typeof wb.id === 'string' ? parseInt(wb.id, 10) : wb.id;
+                            return wbId === workblockId;
+                        });
                         const workblock = workblockIndex >= 0 ? vizData.workblocks[workblockIndex] : null;
+
+                        console.log("[SummaryView] Workblock lookup result:", {
+                            workblockIndex,
+                            found: !!workblock,
+                            workblock: workblock ? {
+                                id: workblock.id,
+                                hasTimeline: !!workblock.timeline_data,
+                                hasActivity: !!workblock.activity_data,
+                                hasWordFreq: !!workblock.word_frequency,
+                                timelineLength: workblock.timeline_data?.length || 0,
+                                activityLength: workblock.activity_data?.length || 0,
+                                wordFreqLength: workblock.word_frequency?.length || 0
+                            } : null
+                        });
 
                         if (!workblock) {
                             return (
                                 <div style={{ padding: "20px", textAlign: "center", color: "#666" }}>
-                                    <p>Workblock not found</p>
+                                    <p>Workblock not found (ID: {workblockId})</p>
+                                    <p style={{ fontSize: "12px", marginTop: "10px" }}>
+                                        Available IDs: {vizData.workblocks.map(wb => wb.id).join(", ")}
+                                    </p>
                                 </div>
                             );
                         }
 
                         const workblockNumber = workblockIndex + 1;
 
+                        // Always render charts, even if empty - let the chart components handle empty data
                         return (
                             <div>
                                 <TimelineChart
-                                    timelineData={workblock.timeline_data}
+                                    timelineData={workblock.timeline_data || []}
                                     title={`Workblock #${workblockNumber} Timeline`}
                                 />
                                 <ActivityChart
-                                    activityData={workblock.activity_data}
+                                    activityData={workblock.activity_data || []}
                                     title={`Workblock #${workblockNumber} Activity Breakdown`}
                                 />
                                 <WordFrequencyChart
-                                    wordFrequency={workblock.word_frequency}
+                                    wordFrequency={workblock.word_frequency || []}
                                     title={`Workblock #${workblockNumber} Word Frequency`}
                                 />
                             </div>
