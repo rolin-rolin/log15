@@ -8,10 +8,99 @@ use crate::tray::{TrayIconState, TrayManager};
 use crate::window_manager::WindowManager;
 use chrono::{DateTime, Local, Utc};
 use serde::{Deserialize, Serialize};
+use std::env;
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::Mutex;
 use tokio::time::{interval, Duration};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TimerConfigInfo {
+    pub dev_mode: bool,
+    pub interval_tick_seconds: u64,
+    pub auto_away_delay_seconds: u64,
+    pub logical_interval_minutes: i32,
+}
+
+#[derive(Debug, Clone)]
+struct TimerConfig {
+    dev_mode: bool,
+    /// How often an interval "completes" (wall-clock), can be accelerated in dev.
+    interval_tick: Duration,
+    /// How long after showing a prompt to auto-record "Away from workspace".
+    auto_away_delay: Duration,
+    /// The logical duration represented by each interval in the data model (minutes).
+    /// This should stay 15 for the current DB + visualization assumptions.
+    logical_interval_minutes: i32,
+}
+
+impl TimerConfig {
+    fn load() -> Self {
+        // Production defaults
+        let mut cfg = Self {
+            dev_mode: false,
+            interval_tick: Duration::from_secs(15 * 60),
+            auto_away_delay: Duration::from_secs(10 * 60),
+            logical_interval_minutes: 15,
+        };
+
+        // Dev-only overrides (ignored in release builds)
+        if cfg!(debug_assertions) {
+            let dev_enabled = env::var("LOG15_DEV_TIMERS")
+                .ok()
+                .map(|v| matches!(v.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"))
+                .unwrap_or(false);
+
+            if dev_enabled {
+                cfg.dev_mode = true;
+                let tick_secs = env::var("LOG15_DEV_INTERVAL_SECONDS")
+                    .ok()
+                    .and_then(|v| v.parse::<u64>().ok())
+                    .unwrap_or(10);
+                let auto_away_secs = env::var("LOG15_DEV_AUTO_AWAY_SECONDS")
+                    .ok()
+                    .and_then(|v| v.parse::<u64>().ok())
+                    .unwrap_or(5);
+                let logical_minutes = env::var("LOG15_DEV_LOGICAL_INTERVAL_MINUTES")
+                    .ok()
+                    .and_then(|v| v.parse::<i32>().ok())
+                    .unwrap_or(15)
+                    .max(1);
+
+                cfg.interval_tick = Duration::from_secs(tick_secs.max(1));
+                cfg.auto_away_delay = Duration::from_secs(auto_away_secs.max(1));
+                cfg.logical_interval_minutes = logical_minutes;
+
+                println!(
+                    "[TIMER] Dev timers enabled: interval_tick={}s, auto_away_delay={}s, logical_interval_minutes={}",
+                    cfg.interval_tick.as_secs(),
+                    cfg.auto_away_delay.as_secs(),
+                    cfg.logical_interval_minutes
+                );
+            }
+        }
+
+        cfg
+    }
+
+    fn total_intervals(&self, duration_minutes: i32) -> i32 {
+        let logical = self.logical_interval_minutes.max(1);
+        if duration_minutes <= 0 {
+            return 1;
+        }
+        // Ceiling division so we never under-count.
+        ((duration_minutes + logical - 1) / logical).max(1)
+    }
+
+    fn info(&self) -> TimerConfigInfo {
+        TimerConfigInfo {
+            dev_mode: self.dev_mode,
+            interval_tick_seconds: self.interval_tick.as_secs(),
+            auto_away_delay_seconds: self.auto_away_delay.as_secs(),
+            logical_interval_minutes: self.logical_interval_minutes,
+        }
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TimerState {
@@ -41,16 +130,31 @@ pub struct TimerManager {
     app: AppHandle,
     interval_handle: Arc<Mutex<Option<tokio::task::JoinHandle<()>>>>,
     auto_away_handle: Arc<Mutex<Option<tokio::task::JoinHandle<()>>>>,
+    config: TimerConfig,
 }
 
 impl TimerManager {
     pub fn new(app: AppHandle) -> Self {
+        let config = TimerConfig::load();
         Self {
             state: Arc::new(Mutex::new(TimerState::default())),
             app,
             interval_handle: Arc::new(Mutex::new(None)),
             auto_away_handle: Arc::new(Mutex::new(None)),
+            config,
         }
+    }
+
+    pub fn get_config_info(&self) -> TimerConfigInfo {
+        self.config.info()
+    }
+
+    pub fn logical_interval_minutes(&self) -> i32 {
+        self.config.logical_interval_minutes
+    }
+
+    pub fn total_intervals_for_duration(&self, duration_minutes: i32) -> i32 {
+        self.config.total_intervals(duration_minutes)
     }
 
     /// Start a workblock timer
@@ -62,8 +166,8 @@ impl TimerManager {
         }
 
         // Calculate number of intervals
-        // Each interval is 15 minutes, so divide total duration by 15
-        let total_intervals = duration_minutes / 15;
+        // Interval counting is based on the logical interval minutes (typically 15).
+        let total_intervals = self.config.total_intervals(duration_minutes);
         
         // Initialize state
         state.workblock_id = Some(workblock_id);
@@ -86,10 +190,11 @@ impl TimerManager {
         // Start the interval timer
         let state_clone = Arc::clone(&self.state);
         let app_clone = self.app.clone();
+        let config = self.config.clone();
         
         let handle = tokio::spawn(async move {
-            // Each interval is 15 minutes
-            let mut interval_timer = interval(Duration::from_secs(15 * 60));
+            // Each interval completes on the configured tick (can be accelerated in dev mode).
+            let mut interval_timer = interval(config.interval_tick);
             interval_timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
             // Consume the immediate first tick to establish the baseline "now"
@@ -259,6 +364,7 @@ impl TimerManager {
         let app_clone = self.app.clone();
         let state_clone = Arc::clone(&self.state);
         let interval_handle_clone = Arc::clone(&self.interval_handle);
+        let config = self.config.clone();
         
         let handle = tokio::spawn(async move {
             // #region agent log
@@ -268,8 +374,8 @@ impl TimerManager {
                 let _ = writeln!(file, r#"{{"location":"timer.rs:264","message":"Auto-away timer started","data":{{"interval_id":{},"timestamp":{}}},"timestamp":{},"sessionId":"debug-session","runId":"run1","hypothesisId":"A"}}"#, interval_id, chrono::Utc::now().timestamp_millis(), chrono::Utc::now().timestamp_millis());
             }
             // #endregion
-            // Auto-away timer: 10 minutes
-            tokio::time::sleep(Duration::from_secs(10 * 60)).await;
+            // Auto-away timer: configurable (accelerated in dev mode)
+            tokio::time::sleep(config.auto_away_delay).await;
             
             // #region agent log
             if let Ok(mut file) = OpenOptions::new().create(true).append(true).open("/Users/ronaldlin/log15/.cursor/debug.log") {
@@ -296,9 +402,8 @@ impl TimerManager {
                     println!("[TIMER] Auto-away: Recording 'Away from workspace' for interval {}", interval_id);
                     
                     // Check if this is the last interval BEFORE deciding what to do with the window
-                    // Intervals are 15 minutes, so last interval is duration_minutes / 15 (duration is configured in 15-min increments).
                     let is_last_interval = if let Ok(workblock) = get_workblock_by_id(&app_clone, interval.workblock_id) {
-                        let total_intervals = workblock.duration_minutes.unwrap_or(60) / 15;
+                        let total_intervals = config.total_intervals(workblock.duration_minutes.unwrap_or(60));
                         let result = interval.interval_number >= total_intervals;
                         // #region agent log
                         if let Ok(mut file) = OpenOptions::new().create(true).append(true).open("/Users/ronaldlin/log15/.cursor/debug.log") {
@@ -427,7 +532,8 @@ impl TimerManager {
         
         if let Some(start_time) = state.interval_start_time {
             let elapsed = (Local::now() - start_time).num_seconds();
-            let remaining = 15 * 60 - elapsed; // 15 minutes = 900 seconds
+            let interval_secs = self.config.interval_tick.as_secs() as i64;
+            let remaining = interval_secs - elapsed;
             Some(remaining.max(0))
         } else {
             None
@@ -458,8 +564,7 @@ impl TimerManager {
                     
                     // Calculate remaining intervals
                     let elapsed_intervals = current_interval.interval_number;
-                    // TESTING: 10-second intervals (duration_minutes * 6 per minute)
-                    let total_intervals = duration * 6; // TESTING: Changed from duration / 15
+                    let total_intervals = self.config.total_intervals(duration);
                     let remaining_intervals = total_intervals - elapsed_intervals;
                     
                     if remaining_intervals > 0 {

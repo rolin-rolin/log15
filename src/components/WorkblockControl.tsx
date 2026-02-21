@@ -3,6 +3,13 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type { Workblock, TimerState } from "../types/workblock";
 
+type TimerConfigInfo = {
+    dev_mode: boolean;
+    interval_tick_seconds: number;
+    auto_away_delay_seconds: number;
+    logical_interval_minutes: number;
+};
+
 interface WorkblockControlProps {
     onNavigateToSummary?: () => void;
     onNavigateToArchive?: () => void;
@@ -11,6 +18,7 @@ interface WorkblockControlProps {
 export default function WorkblockControl({ onNavigateToSummary, onNavigateToArchive }: WorkblockControlProps) {
     const [activeWorkblock, setActiveWorkblock] = useState<Workblock | null>(null);
     const [timerState, setTimerState] = useState<TimerState | null>(null);
+    const [timerConfig, setTimerConfig] = useState<TimerConfigInfo | null>(null);
     const [hours, setHours] = useState<number>(1); // Default 1 hour
     const [minutes, setMinutes] = useState<number>(15); // Default 15 minutes (minimum)
     const [timeRemaining, setTimeRemaining] = useState<number | null>(null);
@@ -20,10 +28,13 @@ export default function WorkblockControl({ onNavigateToSummary, onNavigateToArch
     // Calculate total duration in minutes
     const duration = hours * 60 + minutes;
 
+    const minuteOptions = timerConfig?.dev_mode ? [0, 1, 15, 30, 45] : [0, 15, 30, 45];
+
     // Load active workblock on mount
     useEffect(() => {
         loadActiveWorkblock();
         loadTimerState();
+        loadTimerConfig();
 
         // Set up interval to update timer state
         const interval = setInterval(() => {
@@ -50,6 +61,23 @@ export default function WorkblockControl({ onNavigateToSummary, onNavigateToArch
             unlistenPromise?.then((fn) => fn());
         };
     }, []);
+
+    // Ensure minutes selection is valid when dev mode is off
+    useEffect(() => {
+        if (!timerConfig?.dev_mode && minutes === 1) {
+            setMinutes(15);
+        }
+    }, [timerConfig?.dev_mode, minutes]);
+
+    const loadTimerConfig = async () => {
+        try {
+            const cfg = await invoke<TimerConfigInfo>("get_timer_config_cmd");
+            setTimerConfig(cfg);
+        } catch (error) {
+            // Safe to ignore; older backend might not have this command
+            console.warn("Failed to load timer config:", error);
+        }
+    };
 
     const loadActiveWorkblock = async () => {
         try {
@@ -145,6 +173,25 @@ export default function WorkblockControl({ onNavigateToSummary, onNavigateToArch
                 alignItems: "center",
             }}
         >
+            {timerConfig?.dev_mode && (
+                <div
+                    style={{
+                        width: "100%",
+                        maxWidth: "600px",
+                        marginBottom: "12px",
+                        padding: "10px 12px",
+                        borderRadius: "8px",
+                        background: "#fff3cd",
+                        border: "1px solid #ffe69c",
+                        color: "#664d03",
+                        fontSize: "13px",
+                        textAlign: "left",
+                    }}
+                >
+                    <strong>Dev timers enabled.</strong>{" "}
+                    Interval tick: {timerConfig.interval_tick_seconds}s · Auto-away: {timerConfig.auto_away_delay_seconds}s
+                </div>
+            )}
             <div style={{ textAlign: "center", marginBottom: "20px", width: "100%" }}>
                 <h1 style={{ margin: 0, marginBottom: "15px" }}>Log15</h1>
                 <div style={{ display: "flex", gap: "10px", justifyContent: "center" }}>
@@ -283,7 +330,7 @@ export default function WorkblockControl({ onNavigateToSummary, onNavigateToArch
                                         width: "100px",
                                     }}
                                 >
-                                    {[0, 15, 30, 45].map((m) => (
+                                    {minuteOptions.map((m) => (
                                         <option key={m} value={m}>
                                             {m} min
                                         </option>

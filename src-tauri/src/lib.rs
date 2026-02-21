@@ -17,6 +17,7 @@ use window_manager::WindowManager;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tauri::{Manager, Emitter, async_runtime};
+use timer::TimerConfigInfo;
 
 // Re-export types for frontend
 pub use db::{Workblock, Interval, DailyArchive, WorkblockStatus, IntervalStatus};
@@ -146,10 +147,12 @@ async fn submit_interval_words(
     let workblock = get_workblock_by_id(&app, workblock_id)
         .map_err(|e| e.to_string())?;
     
-    // Calculate based on 15-minute intervals
-    // Each interval is 15 minutes, so divide total duration by 15
-    let total_intervals = workblock.duration_minutes.unwrap_or(60) / 15;
-    // If this interval's number equals total_intervals, it's the last one
+    // Calculate based on TimerManager config (keeps dev-timers + real mode consistent)
+    let timer_manager = app.state::<Arc<Mutex<TimerManager>>>();
+    let timer = timer_manager.lock().await;
+    let total_intervals = timer.total_intervals_for_duration(workblock.duration_minutes.unwrap_or(60));
+    drop(timer);
+
     let is_last_interval = interval.interval_number >= total_intervals;
     
     if is_last_interval {
@@ -195,6 +198,13 @@ async fn submit_interval_words(
         "interval": interval,
         "is_last_interval": is_last_interval
     }))
+}
+
+#[tauri::command]
+async fn get_timer_config_cmd(app: tauri::AppHandle) -> Result<TimerConfigInfo, String> {
+    let timer_manager = app.state::<Arc<Mutex<TimerManager>>>();
+    let timer = timer_manager.lock().await;
+    Ok(timer.get_config_info())
 }
 
 // Window management commands
@@ -441,6 +451,7 @@ pub fn run() {
             get_daily_visualization_data_cmd,
             get_timer_state,
             get_interval_time_remaining,
+            get_timer_config_cmd,
             show_prompt_window_cmd,
             hide_prompt_window_cmd,
         ])
