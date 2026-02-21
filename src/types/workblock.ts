@@ -6,6 +6,7 @@ export interface Workblock {
     start_time: string;
     end_time?: string;
     duration_minutes?: number;
+    duration_set_minutes?: number;
     status: "active" | "completed" | "cancelled";
     is_archived?: boolean;
     created_at?: string;
@@ -72,6 +73,8 @@ export interface WordFrequency {
 export interface WorkblockVisualization {
     id: number;
     duration_minutes?: number;
+    duration_set_minutes?: number;
+    duration_worked_minutes?: number;
     status?: "active" | "completed" | "cancelled";
     timeline_data: TimelineData[];
     activity_data: ActivityData[];

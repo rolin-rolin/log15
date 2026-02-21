@@ -29,12 +29,39 @@ pub fn init_db(app: &AppHandle) -> Result<Connection> {
             start_time DATETIME NOT NULL,
             end_time DATETIME,
             duration_minutes INTEGER,
+            duration_set_minutes INTEGER,
             status TEXT NOT NULL,
             is_archived BOOLEAN DEFAULT 0,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )",
         [],
     )?;
+
+    // Lightweight migration for older DBs: add duration_set_minutes if missing
+    // (we keep duration_minutes as the actual worked duration, and duration_set_minutes as the user-selected duration)
+    let mut has_duration_set = false;
+    {
+        let mut stmt = conn.prepare("PRAGMA table_info(workblocks)")?;
+        let columns = stmt.query_map([], |row| row.get::<_, String>(1))?;
+        for col in columns {
+            if col? == "duration_set_minutes" {
+                has_duration_set = true;
+                break;
+            }
+        }
+    } // ensure stmt is dropped before returning conn
+    if !has_duration_set {
+        conn.execute(
+            "ALTER TABLE workblocks ADD COLUMN duration_set_minutes INTEGER",
+            [],
+        )?;
+        // Best-effort backfill: for existing rows we no longer know the originally-set duration
+        // if duration_minutes was overwritten on completion/cancel. Use duration_minutes as fallback.
+        conn.execute(
+            "UPDATE workblocks SET duration_set_minutes = duration_minutes WHERE duration_set_minutes IS NULL",
+            [],
+        )?;
+    }
     
     // Create intervals table
     conn.execute(
@@ -99,6 +126,7 @@ pub struct Workblock {
     pub start_time: String,  // ISO 8601 format
     pub end_time: Option<String>,
     pub duration_minutes: Option<i32>,
+    pub duration_set_minutes: Option<i32>,
     pub status: WorkblockStatus,
     pub is_archived: bool,
     pub created_at: Option<String>,
@@ -190,9 +218,9 @@ pub fn create_workblock(app: &AppHandle, duration_minutes: i32) -> Result<Workbl
     let start_time = now.to_rfc3339();
     
     conn.execute(
-        "INSERT INTO workblocks (date, start_time, duration_minutes, status, is_archived)
-         VALUES (?1, ?2, ?3, ?4, 0)",
-        params![date, start_time, duration_minutes, WorkblockStatus::Active.as_str()],
+        "INSERT INTO workblocks (date, start_time, duration_minutes, duration_set_minutes, status, is_archived)
+         VALUES (?1, ?2, ?3, ?4, ?5, 0)",
+        params![date, start_time, duration_minutes, duration_minutes, WorkblockStatus::Active.as_str()],
     )?;
     
     let id = conn.last_insert_rowid();
@@ -203,6 +231,7 @@ pub fn create_workblock(app: &AppHandle, duration_minutes: i32) -> Result<Workbl
         start_time,
         end_time: None,
         duration_minutes: Some(duration_minutes),
+        duration_set_minutes: Some(duration_minutes),
         status: WorkblockStatus::Active,
         is_archived: false,
         created_at: Some(now.to_rfc3339()),
@@ -213,7 +242,7 @@ pub fn create_workblock(app: &AppHandle, duration_minutes: i32) -> Result<Workbl
 pub fn get_active_workblock(app: &AppHandle) -> Result<Option<Workblock>> {
     let conn = get_db_connection(app)?;
     let mut stmt = conn.prepare(
-        "SELECT id, date, start_time, end_time, duration_minutes, status, is_archived, created_at
+        "SELECT id, date, start_time, end_time, duration_minutes, duration_set_minutes, status, is_archived, created_at
          FROM workblocks
          WHERE status = 'active'
          ORDER BY start_time DESC
@@ -227,9 +256,10 @@ pub fn get_active_workblock(app: &AppHandle) -> Result<Option<Workblock>> {
             start_time: row.get(2)?,
             end_time: row.get(3)?,
             duration_minutes: row.get(4)?,
-            status: WorkblockStatus::from_str(&row.get::<_, String>(5)?),
-            is_archived: row.get(6)?,
-            created_at: row.get(7)?,
+            duration_set_minutes: row.get(5)?,
+            status: WorkblockStatus::from_str(&row.get::<_, String>(6)?),
+            is_archived: row.get(7)?,
+            created_at: row.get(8)?,
         })
     });
     
@@ -290,7 +320,7 @@ pub fn cancel_workblock(app: &AppHandle, workblock_id: i64) -> Result<Workblock>
 pub fn get_workblock_by_id(app: &AppHandle, workblock_id: i64) -> Result<Workblock> {
     let conn = get_db_connection(app)?;
     let mut stmt = conn.prepare(
-        "SELECT id, date, start_time, end_time, duration_minutes, status, is_archived, created_at
+        "SELECT id, date, start_time, end_time, duration_minutes, duration_set_minutes, status, is_archived, created_at
          FROM workblocks
          WHERE id = ?1"
     )?;
@@ -302,9 +332,10 @@ pub fn get_workblock_by_id(app: &AppHandle, workblock_id: i64) -> Result<Workblo
             start_time: row.get(2)?,
             end_time: row.get(3)?,
             duration_minutes: row.get(4)?,
-            status: WorkblockStatus::from_str(&row.get::<_, String>(5)?),
-            is_archived: row.get(6)?,
-            created_at: row.get(7)?,
+            duration_set_minutes: row.get(5)?,
+            status: WorkblockStatus::from_str(&row.get::<_, String>(6)?),
+            is_archived: row.get(7)?,
+            created_at: row.get(8)?,
         })
     })
 }
@@ -313,7 +344,7 @@ pub fn get_workblock_by_id(app: &AppHandle, workblock_id: i64) -> Result<Workblo
 pub fn get_workblocks_by_date(app: &AppHandle, date: &str) -> Result<Vec<Workblock>> {
     let conn = get_db_connection(app)?;
     let mut stmt = conn.prepare(
-        "SELECT id, date, start_time, end_time, duration_minutes, status, is_archived, created_at
+        "SELECT id, date, start_time, end_time, duration_minutes, duration_set_minutes, status, is_archived, created_at
          FROM workblocks
          WHERE date = ?1
          ORDER BY start_time ASC"
@@ -326,9 +357,10 @@ pub fn get_workblocks_by_date(app: &AppHandle, date: &str) -> Result<Vec<Workblo
             start_time: row.get(2)?,
             end_time: row.get(3)?,
             duration_minutes: row.get(4)?,
-            status: WorkblockStatus::from_str(&row.get::<_, String>(5)?),
-            is_archived: row.get(6)?,
-            created_at: row.get(7)?,
+            duration_set_minutes: row.get(5)?,
+            status: WorkblockStatus::from_str(&row.get::<_, String>(6)?),
+            is_archived: row.get(7)?,
+            created_at: row.get(8)?,
         })
     })?;
     
@@ -704,6 +736,8 @@ pub struct WordFrequency {
 pub struct WorkblockVisualization {
     pub id: i64,
     pub duration_minutes: i32,
+    pub duration_set_minutes: Option<i32>,
+    pub duration_worked_minutes: Option<i32>,
     pub status: String, // "active", "completed", or "cancelled"
     pub timeline_data: Vec<TimelineData>,
     pub activity_data: Vec<ActivityData>,
@@ -807,6 +841,11 @@ pub fn generate_workblock_visualization(
         })
         .collect();
     
+    let duration_set_minutes = workblock
+        .duration_set_minutes
+        .or(workblock.duration_minutes)
+        .unwrap_or(0);
+
     // Calculate duration FIRST: for cancelled workblocks, count only completed intervals (exclude the cancelled interval)
     // For example, if cancelled in the 3rd interval, only count the first 2 intervals (30 min)
     let duration_minutes = if is_cancelled {
@@ -819,6 +858,12 @@ pub fn generate_workblock_visualization(
         }
     } else {
         workblock.duration_minutes.unwrap_or(0)
+    };
+
+    let duration_worked_minutes = if is_cancelled {
+        duration_minutes
+    } else {
+        duration_minutes
     };
     
     // Generate activity data (group by words) - each interval is always 15 minutes
@@ -871,6 +916,8 @@ pub fn generate_workblock_visualization(
     Ok(WorkblockVisualization {
         id: workblock_id,
         duration_minutes,
+        duration_set_minutes: Some(duration_set_minutes),
+        duration_worked_minutes: Some(duration_worked_minutes),
         status: workblock.status.as_str().to_string(),
         timeline_data,
         activity_data,

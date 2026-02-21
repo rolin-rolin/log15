@@ -56,7 +56,12 @@ export default function WordFrequencyChart({ wordFrequency, title = "Word Freque
                         label={{ value: "Count", angle: -90, position: "insideLeft", style: { fill: "white" } }}
                         style={{ fontSize: "12px", fill: "white" }}
                     />
-                    <Tooltip formatter={(value: number) => [`${value} times`, "Frequency"]} />
+                    <Tooltip
+                        formatter={(value) => {
+                            const num = typeof value === "number" ? value : Number(value ?? 0);
+                            return [`${num} times`, "Frequency"];
+                        }}
+                    />
                     <Bar dataKey="count" radius={[8, 8, 0, 0]}>
                         {sortedData.map((entry, index) => (
                             <Cell key={`cell-${index}`} fill={entry.color} />

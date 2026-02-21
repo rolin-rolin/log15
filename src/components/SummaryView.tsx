@@ -180,14 +180,37 @@ export default function SummaryView({ onBack, date }: SummaryViewProps) {
                 
                 return (
                     <div className="summary-stats">
-                        <div className="stat-item">
-                            <div className="stat-value">{formatDuration(workblock?.duration_minutes)}</div>
-                            <div className="stat-label">Duration</div>
-                        </div>
-                        <div className="stat-item">
-                            <div className="stat-value">{formatStatus(workblock?.status)}</div>
-                            <div className="stat-label">Status</div>
-                        </div>
+                        {workblock?.status === "cancelled" ? (
+                            <>
+                                <div className="stat-item">
+                                    <div className="stat-value">
+                                        {formatDuration(workblock?.duration_set_minutes ?? workblock?.duration_minutes)}
+                                    </div>
+                                    <div className="stat-label">Duration Set</div>
+                                </div>
+                                <div className="stat-item">
+                                    <div className="stat-value">
+                                        {formatDuration(workblock?.duration_worked_minutes ?? workblock?.duration_minutes)}
+                                    </div>
+                                    <div className="stat-label">Duration Worked</div>
+                                </div>
+                                <div className="stat-item">
+                                    <div className="stat-value">{formatStatus(workblock?.status)}</div>
+                                    <div className="stat-label">Status</div>
+                                </div>
+                            </>
+                        ) : (
+                            <>
+                                <div className="stat-item">
+                                    <div className="stat-value">{formatDuration(workblock?.duration_minutes)}</div>
+                                    <div className="stat-label">Duration</div>
+                                </div>
+                                <div className="stat-item">
+                                    <div className="stat-value">{formatStatus(workblock?.status)}</div>
+                                    <div className="stat-label">Status</div>
+                                </div>
+                            </>
+                        )}
                     </div>
                 );
             })()}
