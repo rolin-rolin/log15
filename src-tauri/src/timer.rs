@@ -296,8 +296,9 @@ impl TimerManager {
                     println!("[TIMER] Auto-away: Recording 'Away from workspace' for interval {}", interval_id);
                     
                     // Check if this is the last interval BEFORE deciding what to do with the window
+                    // Intervals are 15 minutes, so last interval is duration_minutes / 15 (duration is configured in 15-min increments).
                     let is_last_interval = if let Ok(workblock) = get_workblock_by_id(&app_clone, interval.workblock_id) {
-                        let total_intervals = workblock.duration_minutes.unwrap_or(60) * 6; // TESTING
+                        let total_intervals = workblock.duration_minutes.unwrap_or(60) / 15;
                         let result = interval.interval_number >= total_intervals;
                         // #region agent log
                         if let Ok(mut file) = OpenOptions::new().create(true).append(true).open("/Users/ronaldlin/log15/.cursor/debug.log") {
@@ -316,7 +317,7 @@ impl TimerManager {
 
                     if is_last_interval {
                         println!(
-                            "[TIMER] Auto-away on final interval; showing summary ready for workblock_id={}",
+                            "[TIMER] Auto-away on final interval; completing workblock and showing summary ready for workblock_id={}",
                             interval.workblock_id
                         );
 
@@ -326,7 +327,20 @@ impl TimerManager {
                         }
                         // #endregion
 
-                        // Show summary ready instead of closing the window
+                        // 1. Complete the workblock in DB first so main window and summary see "completed"
+                        let _ = complete_workblock(&app_clone, interval.workblock_id);
+                        let _ = app_clone.emit("workblock-complete", interval.workblock_id);
+
+                        // 2. Reset timer state so main window's get_active_workblock_cmd returns null and UI shows "Start New Workblock"
+                        let mut state = state_clone.lock().await;
+                        *state = TimerState::default();
+                        drop(state);
+
+                        if let Some(h) = interval_handle_clone.lock().await.take() {
+                            h.abort();
+                        }
+
+                        // 3. Show summary-ready overlay and update tray
                         if let Some(window_mgr_state) = app_clone.try_state::<Arc<tauri::async_runtime::Mutex<WindowManager>>>() {
                             // #region agent log
                             if let Ok(mut file) = OpenOptions::new().create(true).append(true).open("/Users/ronaldlin/log15/.cursor/debug.log") {
@@ -349,24 +363,9 @@ impl TimerManager {
                             // #endregion
                         }
 
-                        // Finalize the workblock
-                        let _ = complete_workblock(&app_clone, interval.workblock_id);
-                        let _ = app_clone.emit("workblock-complete", interval.workblock_id);
-
-                        // Update tray state to SummaryReady
                         if let Some(tray_mgr_state) = app_clone.try_state::<Arc<Mutex<TrayManager>>>() {
                             let mut tray = tray_mgr_state.lock().await;
                             tray.update_icon_state(TrayIconState::SummaryReady).await;
-                        }
-
-                        // Reset timer state
-                        let mut state = state_clone.lock().await;
-                        *state = TimerState::default();
-                        drop(state);
-
-                        // Stop interval ticking task if it still exists
-                        if let Some(h) = interval_handle_clone.lock().await.take() {
-                            h.abort();
                         }
                     } else {
                         // #region agent log

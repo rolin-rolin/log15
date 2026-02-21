@@ -161,6 +161,12 @@ async fn submit_interval_words(
             // Wait for checkmark animation to complete (2 seconds)
             tokio::time::sleep(tokio::time::Duration::from_millis(2000)).await;
             
+            // Finalize the workblock
+            let timer_manager = app_clone.state::<Arc<Mutex<TimerManager>>>();
+            let timer = timer_manager.lock().await;
+            let _ = timer.complete_workblock(workblock_id).await;
+            drop(timer);
+
             // Close prompt window and open summary-ready window
             let window_manager = app_clone.state::<Arc<Mutex<WindowManager>>>();
             let window_mgr = window_manager.lock().await;
@@ -172,11 +178,6 @@ async fn submit_interval_words(
             let mut tray = tray_manager.lock().await;
             tray.update_icon_state(crate::tray::TrayIconState::SummaryReady).await;
             drop(tray);
-
-            // Finalize the workblock
-            let timer_manager = app_clone.state::<Arc<Mutex<TimerManager>>>();
-            let timer = timer_manager.lock().await;
-            let _ = timer.complete_workblock(workblock_id).await;
         });
     } else {
         // #region agent log

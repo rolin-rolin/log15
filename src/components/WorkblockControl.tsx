@@ -30,11 +30,11 @@ export default function WorkblockControl({ onNavigateToSummary, onNavigateToArch
             loadTimerState();
         }, 1000); // Update every second
 
-        // Listen for workblock events
+        // Listen for workblock events (e.g. completion after last-interval auto-away)
         const setupListeners = async () => {
-            const unlistenComplete = await listen("workblock-complete", () => {
-                loadActiveWorkblock();
-                loadTimerState();
+            const unlistenComplete = await listen("workblock-complete", async () => {
+                await loadActiveWorkblock();
+                await loadTimerState();
             });
 
             return unlistenComplete;

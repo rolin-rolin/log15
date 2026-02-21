@@ -86,16 +86,18 @@ export default function PromptWindow({ intervalId }: PromptWindowProps) {
 
         // Submit words
         try {
-            await invoke<{ is_last_interval: boolean }>("submit_interval_words", {
+            const result = await invoke<{ is_last_interval: boolean }>("submit_interval_words", {
                 intervalId: intervalId,
                 words: words.trim(),
             });
 
-            // For all intervals (including last), close window after checkmark duration
-            // For last interval, backend will open summary-ready window
-            setTimeout(() => {
-                invoke("hide_prompt_window_cmd").catch(console.error);
-            }, CHECKMARK_DURATION_MS);
+            // For non-last intervals, close window after the checkmark duration.
+            // For the last interval, the backend will close/reopen the window as "summary-ready".
+            if (!result?.is_last_interval) {
+                setTimeout(() => {
+                    invoke("hide_prompt_window_cmd").catch(console.error);
+                }, CHECKMARK_DURATION_MS);
+            }
         } catch (error) {
             console.error("Failed to submit words:", error);
             setShowCheckmark(false);
