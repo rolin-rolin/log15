@@ -61,6 +61,15 @@ export default function WordFrequencyChart({ wordFrequency, title = "Word Freque
                             const num = typeof value === "number" ? value : Number(value ?? 0);
                             return [`${num} times`, "Frequency"];
                         }}
+                        contentStyle={{
+                            backgroundColor: "#ffffff",
+                            border: "1px solid #e5e7eb",
+                            borderRadius: "4px",
+                            color: "#000000",
+                            boxShadow: "0 8px 24px rgba(0,0,0,0.12)",
+                        }}
+                        labelStyle={{ color: "#000000" }}
+                        itemStyle={{ color: "#000000" }}
                     />
                     <Bar dataKey="count" radius={[8, 8, 0, 0]}>
                         {sortedData.map((entry, index) => (

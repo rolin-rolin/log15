@@ -102,11 +102,14 @@ export default function ActivityChart({ activityData, title = "Activity Breakdow
                             ];
                         }}
                         contentStyle={{
-                            backgroundColor: "rgba(0, 0, 0, 0.8)",
-                            border: "1px solid #333",
+                            backgroundColor: "#ffffff",
+                            border: "1px solid #e5e7eb",
                             borderRadius: "4px",
-                            color: "white",
+                            color: "#000000",
+                            boxShadow: "0 8px 24px rgba(0,0,0,0.12)",
                         }}
+                        labelStyle={{ color: "#000000" }}
+                        itemStyle={{ color: "#000000" }}
                     />
                 </PieChart>
             </ResponsiveContainer>

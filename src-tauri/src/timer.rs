@@ -238,8 +238,14 @@ impl TimerManager {
                     state.prompt_shown_time = Some(prompt_time);
                     drop(state);
                     
-                    // Emit event to show prompt window (frontend will handle it)
-                    // The frontend will listen for interval-complete and call show_prompt_window_cmd
+                    // Start auto-away timer from backend (authoritative interval lifecycle).
+                    // This avoids relying on frontend timing/order to arm auto-away.
+                    if let Some(timer_mgr_state) = app_clone.try_state::<Arc<Mutex<TimerManager>>>() {
+                        let timer_mgr = timer_mgr_state.lock().await;
+                        let _ = timer_mgr.start_auto_away_timer(interval_id).await;
+                    }
+
+                    // Emit event to show prompt window (frontend listens and shows overlay).
                 }
                 
                 // Check if we've reached the total number of intervals

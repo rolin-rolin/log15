@@ -227,12 +227,7 @@ async fn show_prompt_window_cmd(
             return Err(e);
         }
     }
-    
-    // Start auto-away timer
-    let timer_manager = app.state::<Arc<Mutex<TimerManager>>>();
-    let timer = timer_manager.lock().await;
-    timer.start_auto_away_timer(interval_id).await?;
-    
+
     Ok(())
 }
 
