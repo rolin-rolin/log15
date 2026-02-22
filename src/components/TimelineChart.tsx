@@ -22,6 +22,14 @@ export default function TimelineChart({ timelineData, title = "Timeline", workbl
         return index >= 0 ? index + 1 : null;
     };
 
+    const formatBoundaryTime = (isoTime?: string): string => {
+        if (!isoTime) return "N/A";
+        return new Date(isoTime).toLocaleTimeString([], {
+            hour: "2-digit",
+            minute: "2-digit",
+        });
+    };
+
     // Helper function to format boundary label
     const formatBoundaryLabel = (endingWorkblockId: number | null, startingWorkblockId: number | null): string => {
         if (!workblockBoundaries || !startingWorkblockId) return "";
@@ -29,14 +37,30 @@ export default function TimelineChart({ timelineData, title = "Timeline", workbl
         const endingNum = endingWorkblockId ? getWorkblockNumber(endingWorkblockId) : null;
         const startingNum = getWorkblockNumber(startingWorkblockId);
         const endingBoundary = endingWorkblockId ? workblockBoundaries.find((wb) => wb.id === endingWorkblockId) : null;
+        const startingBoundary = workblockBoundaries.find((wb) => wb.id === startingWorkblockId);
 
         if (endingNum && startingNum) {
             const endingStatus = endingBoundary?.status === "cancelled" ? " (Cancelled)" : "";
-            return `Workblock #${endingNum}${endingStatus} End / Workblock #${startingNum} Start`;
+            const endingTime = formatBoundaryTime(endingBoundary?.end_time);
+            const startingTime = formatBoundaryTime(startingBoundary?.start_time);
+            return `Workblock #${endingNum}${endingStatus} End (${endingTime}) / Workblock #${startingNum} Start (${startingTime})`;
         } else if (startingNum) {
-            return `Workblock #${startingNum} Start`;
+            const startingTime = formatBoundaryTime(startingBoundary?.start_time);
+            return `Workblock #${startingNum} Start (${startingTime})`;
         }
         return "";
+    };
+
+    const formatFinalEndLabel = (endingWorkblockId: number | null): string => {
+        if (!workblockBoundaries || !endingWorkblockId) return "";
+
+        const endingNum = getWorkblockNumber(endingWorkblockId);
+        const endingBoundary = workblockBoundaries.find((wb) => wb.id === endingWorkblockId);
+        if (!endingNum || !endingBoundary) return "";
+
+        const endingStatus = endingBoundary.status === "cancelled" ? " (Cancelled)" : "";
+        const endingTime = formatBoundaryTime(endingBoundary.end_time);
+        return `Workblock #${endingNum}${endingStatus} End (${endingTime})`;
     };
 
     // Build the display items (intervals + boundaries)
@@ -74,7 +98,7 @@ export default function TimelineChart({ timelineData, title = "Timeline", workbl
                         displayItems.push({
                             type: "boundary",
                             data: {
-                                label: `Workblock #${workblockNum} Start`,
+                                label: `Workblock #${workblockNum} Start (${formatBoundaryTime(firstBoundary.start_time)})`,
                             },
                         });
                     }
@@ -107,6 +131,19 @@ export default function TimelineChart({ timelineData, title = "Timeline", workbl
 
         previousWorkblockId = currentWorkblockId;
     });
+
+    // Add a final boundary for the last workblock end time
+    if (shouldShowBoundaries && previousWorkblockId !== null) {
+        const finalEndLabel = formatFinalEndLabel(previousWorkblockId);
+        if (finalEndLabel) {
+            displayItems.push({
+                type: "boundary",
+                data: {
+                    label: finalEndLabel,
+                },
+            });
+        }
+    }
 
     return (
         <div style={{ marginTop: "20px" }}>
