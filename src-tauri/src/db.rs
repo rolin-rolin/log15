@@ -275,13 +275,21 @@ pub fn complete_workblock(app: &AppHandle, workblock_id: i64) -> Result<Workbloc
     let conn = get_db_connection(app)?;
     let end_time = Local::now().to_rfc3339();
     
-    // Calculate duration
+    // Calculate duration.
+    // Important: completion can happen after the final interval ends (e.g. waiting for last prompt/auto-away),
+    // so clamp worked duration to the originally set duration to avoid post-workblock inflation.
     let workblock = get_workblock_by_id(app, workblock_id)?;
     let start_time = DateTime::parse_from_rfc3339(&workblock.start_time)
         .map_err(|e| rusqlite::Error::InvalidColumnType(0, format!("Invalid start_time: {}", e), rusqlite::types::Type::Text))?;
     let end_time_dt = DateTime::parse_from_rfc3339(&end_time)
         .map_err(|e| rusqlite::Error::InvalidColumnType(0, format!("Invalid end_time: {}", e), rusqlite::types::Type::Text))?;
-    let duration = (end_time_dt - start_time).num_minutes() as i32;
+    let elapsed_minutes = (end_time_dt - start_time).num_minutes() as i32;
+    let planned_minutes = workblock
+        .duration_set_minutes
+        .or(workblock.duration_minutes)
+        .unwrap_or(elapsed_minutes)
+        .max(0);
+    let duration = elapsed_minutes.max(0).min(planned_minutes);
     
     conn.execute(
         "UPDATE workblocks 
