@@ -63,6 +63,10 @@ pub fn init_db(app: &AppHandle) -> Result<Connection> {
         )?;
     }
     
+    // Lightweight migration: add name and notes columns if missing
+    let _ = conn.execute("ALTER TABLE workblocks ADD COLUMN name TEXT", []);
+    let _ = conn.execute("ALTER TABLE workblocks ADD COLUMN notes TEXT", []);
+
     // Create intervals table
     conn.execute(
         "CREATE TABLE IF NOT EXISTS intervals (
@@ -130,6 +134,8 @@ pub struct Workblock {
     pub status: WorkblockStatus,
     pub is_archived: bool,
     pub created_at: Option<String>,
+    pub name: Option<String>,
+    pub notes: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
@@ -235,6 +241,8 @@ pub fn create_workblock(app: &AppHandle, duration_minutes: i32) -> Result<Workbl
         status: WorkblockStatus::Active,
         is_archived: false,
         created_at: Some(now.to_rfc3339()),
+        name: None,
+        notes: None,
     })
 }
 
@@ -242,13 +250,13 @@ pub fn create_workblock(app: &AppHandle, duration_minutes: i32) -> Result<Workbl
 pub fn get_active_workblock(app: &AppHandle) -> Result<Option<Workblock>> {
     let conn = get_db_connection(app)?;
     let mut stmt = conn.prepare(
-        "SELECT id, date, start_time, end_time, duration_minutes, duration_set_minutes, status, is_archived, created_at
+        "SELECT id, date, start_time, end_time, duration_minutes, duration_set_minutes, status, is_archived, created_at, name, notes
          FROM workblocks
          WHERE status = 'active'
          ORDER BY start_time DESC
          LIMIT 1"
     )?;
-    
+
     let workblock_result = stmt.query_row([], |row| {
         Ok(Workblock {
             id: Some(row.get(0)?),
@@ -260,6 +268,8 @@ pub fn get_active_workblock(app: &AppHandle) -> Result<Option<Workblock>> {
             status: WorkblockStatus::from_str(&row.get::<_, String>(6)?),
             is_archived: row.get(7)?,
             created_at: row.get(8)?,
+            name: row.get(9)?,
+            notes: row.get(10)?,
         })
     });
     
@@ -335,15 +345,30 @@ pub fn cancel_workblock(app: &AppHandle, workblock_id: i64) -> Result<Workblock>
     get_workblock_by_id(app, workblock_id)
 }
 
+/// Update name and notes for a workblock
+pub fn update_workblock_name_notes(
+    app: &AppHandle,
+    workblock_id: i64,
+    name: Option<String>,
+    notes: Option<String>,
+) -> Result<Workblock> {
+    let conn = get_db_connection(app)?;
+    conn.execute(
+        "UPDATE workblocks SET name = ?1, notes = ?2 WHERE id = ?3",
+        params![name, notes, workblock_id],
+    )?;
+    get_workblock_by_id(app, workblock_id)
+}
+
 /// Get workblock by ID
 pub fn get_workblock_by_id(app: &AppHandle, workblock_id: i64) -> Result<Workblock> {
     let conn = get_db_connection(app)?;
     let mut stmt = conn.prepare(
-        "SELECT id, date, start_time, end_time, duration_minutes, duration_set_minutes, status, is_archived, created_at
+        "SELECT id, date, start_time, end_time, duration_minutes, duration_set_minutes, status, is_archived, created_at, name, notes
          FROM workblocks
          WHERE id = ?1"
     )?;
-    
+
     stmt.query_row(params![workblock_id], |row| {
         Ok(Workblock {
             id: Some(row.get(0)?),
@@ -355,6 +380,8 @@ pub fn get_workblock_by_id(app: &AppHandle, workblock_id: i64) -> Result<Workblo
             status: WorkblockStatus::from_str(&row.get::<_, String>(6)?),
             is_archived: row.get(7)?,
             created_at: row.get(8)?,
+            name: row.get(9)?,
+            notes: row.get(10)?,
         })
     })
 }
@@ -363,12 +390,12 @@ pub fn get_workblock_by_id(app: &AppHandle, workblock_id: i64) -> Result<Workblo
 pub fn get_workblocks_by_date(app: &AppHandle, date: &str) -> Result<Vec<Workblock>> {
     let conn = get_db_connection(app)?;
     let mut stmt = conn.prepare(
-        "SELECT id, date, start_time, end_time, duration_minutes, duration_set_minutes, status, is_archived, created_at
+        "SELECT id, date, start_time, end_time, duration_minutes, duration_set_minutes, status, is_archived, created_at, name, notes
          FROM workblocks
          WHERE date = ?1
          ORDER BY start_time ASC"
     )?;
-    
+
     let workblock_iter = stmt.query_map(params![date], |row| {
         Ok(Workblock {
             id: Some(row.get(0)?),
@@ -380,6 +407,8 @@ pub fn get_workblocks_by_date(app: &AppHandle, date: &str) -> Result<Vec<Workblo
             status: WorkblockStatus::from_str(&row.get::<_, String>(6)?),
             is_archived: row.get(7)?,
             created_at: row.get(8)?,
+            name: row.get(9)?,
+            notes: row.get(10)?,
         })
     })?;
     
@@ -758,6 +787,8 @@ pub struct WorkblockVisualization {
     pub duration_set_minutes: Option<i32>,
     pub duration_worked_minutes: Option<i32>,
     pub status: String, // "active", "completed", or "cancelled"
+    pub name: Option<String>,
+    pub notes: Option<String>,
     pub timeline_data: Vec<TimelineData>,
     pub activity_data: Vec<ActivityData>,
     pub word_frequency: Vec<WordFrequency>,
@@ -938,6 +969,8 @@ pub fn generate_workblock_visualization(
         duration_set_minutes: Some(duration_set_minutes),
         duration_worked_minutes: Some(duration_worked_minutes),
         status: workblock.status.as_str().to_string(),
+        name: workblock.name,
+        notes: workblock.notes,
         timeline_data,
         activity_data,
         word_frequency,

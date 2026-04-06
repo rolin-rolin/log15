@@ -10,6 +10,8 @@ export interface Workblock {
     status: "active" | "completed" | "cancelled";
     is_archived?: boolean;
     created_at?: string;
+    name?: string;
+    notes?: string;
 }
 
 export interface Interval {
@@ -76,6 +78,8 @@ export interface WorkblockVisualization {
     duration_set_minutes?: number;
     duration_worked_minutes?: number;
     status?: "active" | "completed" | "cancelled";
+    name?: string;
+    notes?: string;
     timeline_data: TimelineData[];
     activity_data: ActivityData[];
     word_frequency: WordFrequency[];

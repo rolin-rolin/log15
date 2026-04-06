@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type {
     DailyVisualizationData,
@@ -22,9 +22,52 @@ export default function SummaryView({ onBack, date }: SummaryViewProps) {
     const [error, setError] = useState<string | null>(null);
     const [isArchived, setIsArchived] = useState(false);
 
+    // Name/notes editing state
+    const [editingName, setEditingName] = useState(false);
+    const [editingNotes, setEditingNotes] = useState(false);
+    const [nameValue, setNameValue] = useState("");
+    const [notesValue, setNotesValue] = useState("");
+    const nameInputRef = useRef<HTMLInputElement>(null);
+    const notesInputRef = useRef<HTMLTextAreaElement>(null);
+
     useEffect(() => {
         loadSummaryData();
     }, [date]);
+
+    // Sync name/notes fields when switching workblock tabs
+    useEffect(() => {
+        if (!vizData || !activeTab.startsWith("workblock-")) return;
+        const id = parseInt(activeTab.replace("workblock-", ""));
+        const wb = vizData.workblocks.find(w => w.id === id);
+        setNameValue(wb?.name ?? "");
+        setNotesValue(wb?.notes ?? "");
+        setEditingName(false);
+        setEditingNotes(false);
+    }, [activeTab, vizData]);
+
+    const saveNameNotes = async (workblockId: number, name: string, notes: string) => {
+        try {
+            await invoke("update_workblock_name_notes_cmd", {
+                workblockId,
+                name: name.trim() || null,
+                notes: notes.trim() || null,
+            });
+            // Update local vizData so the value persists without a full reload
+            setVizData(prev => {
+                if (!prev) return prev;
+                return {
+                    ...prev,
+                    workblocks: prev.workblocks.map(wb =>
+                        wb.id === workblockId
+                            ? { ...wb, name: name.trim() || undefined, notes: notes.trim() || undefined }
+                            : wb
+                    ),
+                };
+            });
+        } catch (err) {
+            console.error("Failed to save name/notes:", err);
+        }
+    };
 
     const loadSummaryData = async () => {
         setLoading(true);
@@ -318,9 +361,64 @@ export default function SummaryView({ onBack, date }: SummaryViewProps) {
 
                         const workblockNumber = workblockIndex + 1;
 
+                        const isEditable = workblock.status !== "active";
+
                         // Always render charts, even if empty - let the chart components handle empty data
                         return (
                             <div>
+                                {/* Workblock name */}
+                                <div style={{ marginBottom: "12px" }}>
+                                    {editingName ? (
+                                        <input
+                                            ref={nameInputRef}
+                                            type="text"
+                                            value={nameValue}
+                                            onChange={e => setNameValue(e.target.value)}
+                                            onBlur={() => {
+                                                setEditingName(false);
+                                                saveNameNotes(workblock.id, nameValue, notesValue);
+                                            }}
+                                            onKeyDown={e => {
+                                                if (e.key === "Enter") {
+                                                    setEditingName(false);
+                                                    saveNameNotes(workblock.id, nameValue, notesValue);
+                                                } else if (e.key === "Escape") {
+                                                    setEditingName(false);
+                                                    setNameValue(workblock.name ?? "");
+                                                }
+                                            }}
+                                            placeholder="Add a name..."
+                                            style={{
+                                                fontSize: "18px",
+                                                fontWeight: 600,
+                                                border: "none",
+                                                borderBottom: "2px solid #4a90e2",
+                                                background: "transparent",
+                                                outline: "none",
+                                                width: "100%",
+                                                padding: "4px 0",
+                                            }}
+                                            autoFocus
+                                        />
+                                    ) : (
+                                        <div
+                                            onClick={() => isEditable && setEditingName(true)}
+                                            style={{
+                                                fontSize: "18px",
+                                                fontWeight: 600,
+                                                padding: "4px 0",
+                                                cursor: isEditable ? "text" : "default",
+                                                color: nameValue ? "inherit" : "#999",
+                                                borderBottom: isEditable ? "1px dashed #ccc" : "none",
+                                                minHeight: "30px",
+                                            }}
+                                            title={isEditable ? "Click to edit name" : undefined}
+                                        >
+                                            {nameValue || (isEditable ? "Add a name..." : "")}
+                                        </div>
+                                    )}
+                                </div>
+
                                 <TimelineChart
                                     timelineData={workblock.timeline_data || []}
                                     title={`Workblock #${workblockNumber} Timeline`}
@@ -333,6 +431,58 @@ export default function SummaryView({ onBack, date }: SummaryViewProps) {
                                     wordFrequency={workblock.word_frequency || []}
                                     title={`Workblock #${workblockNumber} Word Frequency`}
                                 />
+
+                                {/* Notes section */}
+                                <div style={{ marginTop: "20px" }}>
+                                    <div style={{ fontSize: "13px", fontWeight: 600, color: "#666", marginBottom: "6px", textTransform: "uppercase", letterSpacing: "0.05em" }}>Notes</div>
+                                    {editingNotes ? (
+                                        <textarea
+                                            ref={notesInputRef}
+                                            value={notesValue}
+                                            onChange={e => setNotesValue(e.target.value)}
+                                            onBlur={() => {
+                                                setEditingNotes(false);
+                                                saveNameNotes(workblock.id, nameValue, notesValue);
+                                            }}
+                                            onKeyDown={e => {
+                                                if (e.key === "Escape") {
+                                                    setEditingNotes(false);
+                                                    setNotesValue(workblock.notes ?? "");
+                                                }
+                                            }}
+                                            placeholder="Add notes..."
+                                            style={{
+                                                width: "100%",
+                                                minHeight: "80px",
+                                                border: "1px solid #4a90e2",
+                                                borderRadius: "6px",
+                                                padding: "8px",
+                                                fontSize: "14px",
+                                                background: "transparent",
+                                                outline: "none",
+                                                resize: "vertical",
+                                            }}
+                                            autoFocus
+                                        />
+                                    ) : (
+                                        <div
+                                            onClick={() => isEditable && setEditingNotes(true)}
+                                            style={{
+                                                padding: "8px",
+                                                minHeight: "60px",
+                                                border: isEditable ? "1px dashed #ccc" : "1px solid transparent",
+                                                borderRadius: "6px",
+                                                cursor: isEditable ? "text" : "default",
+                                                fontSize: "14px",
+                                                color: notesValue ? "inherit" : "#999",
+                                                whiteSpace: "pre-wrap",
+                                            }}
+                                            title={isEditable ? "Click to edit notes" : undefined}
+                                        >
+                                            {notesValue || (isEditable ? "Add notes..." : "No notes")}
+                                        </div>
+                                    )}
+                                </div>
                             </div>
                         );
                     })()

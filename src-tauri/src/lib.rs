@@ -7,7 +7,7 @@ pub use tray::TrayManager;
 
 use db::{
     init_db, create_workblock, get_active_workblock, cancel_workblock, get_workblock_by_id,
-    get_workblocks_by_date,
+    get_workblocks_by_date, update_workblock_name_notes,
     add_interval, update_interval_words, get_intervals_by_workblock, get_current_interval,
     check_and_reset_daily, archive_all_unarchived_dates, get_archived_day, get_all_archived_dates, get_today_date,
     generate_workblock_visualization, generate_daily_aggregate, generate_daily_visualization_data,
@@ -205,6 +205,16 @@ async fn get_timer_config_cmd(app: tauri::AppHandle) -> Result<TimerConfigInfo, 
     let timer_manager = app.state::<Arc<Mutex<TimerManager>>>();
     let timer = timer_manager.lock().await;
     Ok(timer.get_config_info())
+}
+
+#[tauri::command]
+fn update_workblock_name_notes_cmd(
+    app: tauri::AppHandle,
+    workblock_id: i64,
+    name: Option<String>,
+    notes: Option<String>,
+) -> Result<Workblock, String> {
+    update_workblock_name_notes(&app, workblock_id, name, notes).map_err(|e| e.to_string())
 }
 
 // Window management commands
@@ -449,6 +459,7 @@ pub fn run() {
             get_timer_config_cmd,
             show_prompt_window_cmd,
             hide_prompt_window_cmd,
+            update_workblock_name_notes_cmd,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
