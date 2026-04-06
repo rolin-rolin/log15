@@ -1,0 +1,337 @@
+.wbc {
+    padding: 32px 20px 24px;
+    max-width: 520px;
+    margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0;
+}
+
+/* ---- Dev banner ---- */
+.wbc-dev-banner {
+    margin-bottom: 16px;
+    padding: 10px 14px;
+    border-radius: var(--radius-sm);
+    background: var(--warning-bg);
+    border: 1px solid var(--warning-border);
+    color: var(--warning-text);
+    font-size: 13px;
+    text-align: left;
+    line-height: 1.4;
+}
+
+/* ---- App header ---- */
+.wbc-header {
+    text-align: center;
+    margin-bottom: 28px;
+}
+
+.wbc-title {
+    font-size: 32px;
+    font-weight: 800;
+    letter-spacing: -0.04em;
+    color: var(--text);
+    margin: 0 0 16px;
+}
+
+.wbc-nav {
+    display: flex;
+    gap: 8px;
+    justify-content: center;
+}
+
+.wbc-nav-btn {
+    padding: 8px 18px;
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    background: var(--bg-card);
+    color: var(--text-2);
+    font-size: 13px;
+    font-weight: 500;
+    font-family: inherit;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s, border-color 0.15s;
+    box-shadow: var(--shadow-sm);
+}
+
+.wbc-nav-btn:hover {
+    background: var(--accent);
+    color: white;
+    border-color: transparent;
+}
+
+/* ---- Card shared ---- */
+.wbc-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 28px 24px;
+    box-shadow: var(--shadow-md);
+}
+
+/* ---- Active workblock card ---- */
+.wbc-card-title {
+    font-size: 13px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-2);
+    margin: 0 0 20px;
+    text-align: center;
+}
+
+.wbc-rows {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    margin-bottom: 20px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+}
+
+.wbc-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 13px 16px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg);
+}
+
+.wbc-row:last-child {
+    border-bottom: none;
+}
+
+.wbc-row-label {
+    font-size: 13px;
+    color: var(--text-2);
+    font-weight: 500;
+}
+
+.wbc-row-value {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text);
+    font-variant-numeric: tabular-nums;
+}
+
+/* Interval number pill */
+.wbc-interval-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 10px;
+    background: rgba(0, 113, 227, 0.1);
+    color: var(--accent);
+    border-radius: 20px;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+/* Timer countdown */
+.wbc-timer {
+    font-size: 28px;
+    font-weight: 700;
+    letter-spacing: -0.04em;
+    color: var(--accent);
+    font-variant-numeric: tabular-nums;
+    text-align: center;
+    margin-bottom: 20px;
+}
+
+/* ---- Start form ---- */
+.wbc-form-title {
+    font-size: 13px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-2);
+    margin: 0 0 20px;
+    text-align: center;
+}
+
+.wbc-duration-row {
+    display: flex;
+    gap: 12px;
+    justify-content: center;
+    margin-bottom: 8px;
+}
+
+.wbc-duration-field {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+}
+
+.wbc-duration-label {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-2);
+}
+
+.wbc-select {
+    padding: 10px 14px;
+    font-size: 20px;
+    font-weight: 600;
+    font-family: inherit;
+    font-variant-numeric: tabular-nums;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--bg);
+    color: var(--text);
+    width: 110px;
+    text-align: center;
+    cursor: pointer;
+    appearance: auto;
+    transition: border-color 0.15s;
+    box-shadow: var(--shadow-sm);
+}
+
+.wbc-select:focus {
+    outline: none;
+    border-color: var(--accent);
+}
+
+.wbc-duration-hint {
+    font-size: 12px;
+    color: var(--text-2);
+    text-align: center;
+    margin: 6px 0 0;
+    min-height: 18px;
+}
+
+/* ---- Buttons ---- */
+.wbc-btn-primary {
+    margin-top: 20px;
+    padding: 14px 24px;
+    background: var(--accent);
+    color: white;
+    border: none;
+    border-radius: var(--radius);
+    font-size: 16px;
+    font-weight: 600;
+    font-family: inherit;
+    cursor: pointer;
+    transition: background 0.15s, opacity 0.15s;
+    width: 100%;
+    letter-spacing: -0.01em;
+}
+
+.wbc-btn-primary:hover:not(:disabled) {
+    background: var(--accent-hover);
+}
+
+.wbc-btn-primary:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+.wbc-btn-danger {
+    margin-top: 4px;
+    padding: 12px 24px;
+    background: transparent;
+    color: var(--danger);
+    border: 1px solid var(--danger);
+    border-radius: var(--radius);
+    font-size: 14px;
+    font-weight: 600;
+    font-family: inherit;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+    width: 100%;
+}
+
+.wbc-btn-danger:hover:not(:disabled) {
+    background: var(--danger);
+    color: white;
+}
+
+.wbc-btn-danger:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+/* ---- Info tooltip ---- */
+.wbc-info-wrap {
+    position: relative;
+    display: flex;
+    justify-content: center;
+    margin-top: 24px;
+}
+
+.wbc-info-btn {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    border: 1.5px solid var(--border);
+    background: var(--bg-card);
+    color: var(--text-2);
+    font-size: 14px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    font-family: inherit;
+    transition: border-color 0.15s, color 0.15s;
+    box-shadow: var(--shadow-sm);
+}
+
+.wbc-info-btn:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+.wbc-tooltip {
+    position: absolute;
+    bottom: calc(100% + 10px);
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--text);
+    color: var(--bg);
+    border-radius: var(--radius);
+    width: 280px;
+    padding: 16px;
+    font-size: 13px;
+    line-height: 1.5;
+    text-align: left;
+    box-shadow: var(--shadow-lg);
+    z-index: 100;
+}
+
+.wbc-tooltip h4 {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--bg);
+    margin: 0 0 10px;
+}
+
+.wbc-tooltip ul {
+    margin: 0;
+    padding-left: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.wbc-tooltip li {
+    color: var(--bg);
+    opacity: 0.85;
+}
+
+.wbc-tooltip-arrow {
+    position: absolute;
+    bottom: -6px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 0;
+    height: 0;
+    border-left: 7px solid transparent;
+    border-right: 7px solid transparent;
+    border-top: 7px solid var(--text);
+}

@@ -1,4 +1,38 @@
-/* Scoped reset for prompt window only */
+/* ============================================================
+   Prompt Window — variables duplicated here because this
+   window loads independently from the main App.css context.
+   ============================================================ */
+:root {
+  --pw-bg:           rgba(255, 255, 255, 0.92);
+  --pw-text:         #1d1d1f;
+  --pw-text-2:       #6e6e73;
+  --pw-text-3:       #aeaeb2;
+  --pw-border:       rgba(0, 0, 0, 0.1);
+  --pw-accent:       #0071e3;
+  --pw-accent-hover: #0077ed;
+  --pw-success:      #34c759;
+  --pw-disabled-bg:  rgba(0, 0, 0, 0.06);
+  --pw-disabled-fg:  #aeaeb2;
+  --pw-input-line:   rgba(0, 0, 0, 0.15);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --pw-bg:           rgba(28, 28, 30, 0.94);
+    --pw-text:         #f5f5f7;
+    --pw-text-2:       #98989d;
+    --pw-text-3:       #636366;
+    --pw-border:       rgba(255, 255, 255, 0.10);
+    --pw-accent:       #0a84ff;
+    --pw-accent-hover: #409cff;
+    --pw-success:      #30d158;
+    --pw-disabled-bg:  rgba(255, 255, 255, 0.06);
+    --pw-disabled-fg:  #636366;
+    --pw-input-line:   rgba(255, 255, 255, 0.15);
+  }
+}
+
+/* ---- Scoped reset ---- */
 .prompt-window-root {
     margin: 0;
     padding: 0;
@@ -14,122 +48,121 @@
     box-sizing: border-box;
 }
 
+/* ---- Container ---- */
 .prompt-container {
     width: 100%;
     height: 100%;
     display: flex;
     flex-direction: column;
-    background: rgba(255, 255, 255, 0.95);
-    backdrop-filter: blur(10px);
+    background: var(--pw-bg);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
     border-radius: 0;
     box-shadow: none;
     padding: 0;
     margin: 0;
-    box-sizing: border-box;
     overflow: hidden;
     position: relative;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+    color: var(--pw-text);
+    -webkit-font-smoothing: antialiased;
 }
 
 .prompt-container.fade-in {
-    animation: fadeIn 0.3s ease-in;
+    animation: fadeIn 0.25s ease-out;
 }
 
 .prompt-container.fade-out {
-    animation: fadeOut 0.3s ease-out;
+    animation: fadeOut 0.25s ease-in;
+    pointer-events: none;
 }
 
 @keyframes fadeIn {
-    from {
-        opacity: 0;
-        transform: scale(0.9) translateY(10px);
-    }
-    to {
-        opacity: 1;
-        transform: scale(1) translateY(0);
-    }
+    from { opacity: 0; transform: translateY(-6px) scale(0.97); }
+    to   { opacity: 1; transform: translateY(0) scale(1); }
 }
 
 @keyframes fadeOut {
-    from {
-        opacity: 1;
-        transform: scale(1) translateY(0);
-    }
-    to {
-        opacity: 0;
-        transform: scale(0.9) translateY(10px);
-    }
+    from { opacity: 1; transform: translateY(0) scale(1); }
+    to   { opacity: 0; transform: translateY(-6px) scale(0.97); }
 }
 
+/* ---- Prompt content ---- */
 .prompt-content {
     width: 100%;
     height: 100%;
     display: flex;
     flex-direction: column;
-    gap: 8px;
-    padding: 40px 20px;
-    box-sizing: border-box;
+    gap: 10px;
+    padding: 28px 24px 20px;
     justify-content: center;
     align-items: center;
     overflow: hidden;
 }
 
 .prompt-label {
-    font-size: 14px;
-    font-weight: 400;
-    color: #666;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--pw-text-2);
     text-align: center;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
     margin: 0;
-    padding: 0;
 }
 
 .words-input {
-    padding: 8px 4px;
+    padding: 6px 2px;
     border: none;
-    border-bottom: 1px solid #ccc;
+    border-bottom: 1.5px solid var(--pw-input-line);
     background: transparent;
     border-radius: 0;
-    font-size: 24px;
+    font-size: 22px;
+    font-weight: 500;
+    font-family: inherit;
     outline: none;
-    transition: border-color 0.2s;
+    transition: border-color 0.15s;
     width: 100%;
-    max-width: 280px;
-    box-sizing: border-box;
+    max-width: 260px;
     text-align: center;
-    color: #333;
+    color: var(--pw-text);
 }
 
 .words-input:focus {
-    border-bottom-color: #4a90e2;
+    border-bottom-color: var(--pw-accent);
 }
 
 .words-input::placeholder {
-    color: #999;
-    opacity: 0.6;
+    color: var(--pw-text-3);
 }
 
+/* ---- Submit button ---- */
 .submit-button {
-    padding: 16px 20px;
-    background: #4a90e2;
+    padding: 14px 20px;
+    background: var(--pw-accent);
     color: white;
     border: none;
     border-radius: 0;
-    font-size: 16px;
-    font-weight: 500;
+    font-size: 15px;
+    font-weight: 600;
+    font-family: inherit;
     cursor: pointer;
-    transition: background 0.2s;
+    transition: background 0.15s;
     width: 100%;
     margin-top: auto;
+    letter-spacing: -0.01em;
 }
 
 .submit-button:hover:not(:disabled) {
-    background: #357abd;
+    background: var(--pw-accent-hover);
 }
 
 .submit-button:disabled {
-    background: #ccc;
+    background: var(--pw-disabled-bg);
+    color: var(--pw-disabled-fg);
     cursor: not-allowed;
 }
 
+/* ---- Checkmark ---- */
 .checkmark-container {
     display: flex;
     align-items: center;
@@ -137,53 +170,42 @@
     width: 100%;
     height: 100%;
     padding: 40px 20px;
-    box-sizing: border-box;
 }
 
 .checkmark {
-    width: 80px;
-    height: 80px;
+    width: 72px;
+    height: 72px;
     border-radius: 50%;
-    background: linear-gradient(135deg, #4caf50 0%, #45a049 100%);
-    color: white;
+    background: var(--pw-success);
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 0;
-    font-weight: bold;
-    animation: checkmarkPop 0.5s cubic-bezier(0.68, -0.55, 0.265, 1.55);
-    box-shadow: 0 4px 20px rgba(76, 175, 80, 0.4);
+    animation: checkmarkPop 0.45s cubic-bezier(0.34, 1.56, 0.64, 1);
+    box-shadow: 0 4px 20px rgba(52, 199, 89, 0.35);
     position: relative;
 }
 
 .checkmark::after {
     content: "";
-    width: 12px;
-    height: 20px;
-    border-right: 4px solid white;
-    border-bottom: 4px solid white;
+    width: 11px;
+    height: 19px;
+    border-right: 3.5px solid white;
+    border-bottom: 3.5px solid white;
     transform: rotate(45deg);
     position: absolute;
     top: 50%;
     left: 50%;
-    margin-left: -6px;
-    margin-top: -14px;
+    margin-left: -5px;
+    margin-top: -13px;
 }
 
 @keyframes checkmarkPop {
-    0% {
-        transform: scale(0);
-        opacity: 0;
-    }
-    50% {
-        transform: scale(1.2);
-    }
-    100% {
-        transform: scale(1);
-        opacity: 1;
-    }
+    0%   { transform: scale(0); opacity: 0; }
+    60%  { transform: scale(1.15); }
+    100% { transform: scale(1); opacity: 1; }
 }
 
+/* ---- Summary ready ---- */
 .summary-ready-content {
     width: 100%;
     height: 100%;
@@ -191,120 +213,60 @@
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 16px;
+    gap: 12px;
     text-align: center;
-    padding: 40px 20px;
-    box-sizing: border-box;
+    padding: 28px 24px 20px;
 }
 
 .summary-icon {
-    font-size: 48px;
+    font-size: 44px;
     animation: summaryPop 0.5s ease-out;
+    line-height: 1;
 }
 
 @keyframes summaryPop {
-    0% {
-        transform: scale(0) rotate(-180deg);
-        opacity: 0;
-    }
-    60% {
-        transform: scale(1.1) rotate(10deg);
-    }
-    100% {
-        transform: scale(1) rotate(0deg);
-        opacity: 1;
-    }
+    0%   { transform: scale(0) rotate(-180deg); opacity: 0; }
+    60%  { transform: scale(1.1) rotate(8deg); }
+    100% { transform: scale(1) rotate(0deg); opacity: 1; }
 }
 
 .summary-title {
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--pw-text);
+    letter-spacing: -0.02em;
     margin: 0;
-    font-size: 20px;
-    font-weight: 600;
-    color: #333;
 }
 
 .summary-message {
+    font-size: 13px;
+    color: var(--pw-text-2);
     margin: 0;
-    font-size: 14px;
-    color: #666;
+    line-height: 1.4;
 }
 
 .close-summary-button {
-    padding: 10px 24px;
-    background: #4a90e2;
+    padding: 10px 22px;
+    background: var(--pw-accent);
     color: white;
     border: none;
-    border-radius: 8px;
+    border-radius: 20px;
     font-size: 14px;
-    font-weight: 500;
+    font-weight: 600;
+    font-family: inherit;
     cursor: pointer;
-    transition: background 0.2s;
-    margin-top: 8px;
+    transition: background 0.15s;
+    margin-top: 4px;
 }
 
 .close-summary-button:hover {
-    background: #357abd;
+    background: var(--pw-accent-hover);
 }
 
+/* ---- Loading ---- */
 .loading-message {
     text-align: center;
-    color: #666;
-    font-size: 14px;
+    color: var(--pw-text-2);
+    font-size: 13px;
     padding: 20px;
-}
-
-@media (prefers-color-scheme: dark) {
-    .prompt-container {
-        background: rgba(30, 30, 32, 0.95);
-    }
-
-    .prompt-label {
-        color: #98989d;
-    }
-
-    .words-input {
-        border-bottom-color: #3a3a3c;
-        color: #f5f5f7;
-    }
-
-    .words-input:focus {
-        border-bottom-color: #0a84ff;
-    }
-
-    .words-input::placeholder {
-        color: #6e6e73;
-    }
-
-    .submit-button {
-        background: #0a84ff;
-    }
-
-    .submit-button:hover:not(:disabled) {
-        background: #409cff;
-    }
-
-    .submit-button:disabled {
-        background: #3a3a3c;
-        color: #6e6e73;
-    }
-
-    .summary-title {
-        color: #f5f5f7;
-    }
-
-    .summary-message {
-        color: #98989d;
-    }
-
-    .close-summary-button {
-        background: #0a84ff;
-    }
-
-    .close-summary-button:hover {
-        background: #409cff;
-    }
-
-    .loading-message {
-        color: #98989d;
-    }
 }

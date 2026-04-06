@@ -1,152 +1,123 @@
 .archive-view {
-    padding: 20px;
-    max-width: 800px;
+    padding: 24px;
+    max-width: 720px;
     margin: 0 auto;
 }
 
+/* ---- Header ---- */
 .archive-header {
     display: flex;
     align-items: center;
-    gap: 15px;
-    margin-bottom: 30px;
+    gap: 12px;
+    margin-bottom: 28px;
 }
 
 .archive-header h1 {
     margin: 0;
-    font-size: 28px;
-    font-weight: 600;
-    color: #333;
+    font-size: 26px;
+    font-weight: 700;
+    color: var(--text);
+    letter-spacing: -0.03em;
 }
 
 .back-button {
-    padding: 8px 16px;
-    background-color: #f0f0f0;
-    color: #333;
-    border: 1px solid #ddd;
-    border-radius: 5px;
+    padding: 7px 14px;
+    background: var(--bg-card);
+    color: var(--text-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
     cursor: pointer;
-    font-size: 14px;
-    transition: background-color 0.2s;
+    font-size: 13px;
+    font-weight: 500;
+    font-family: inherit;
+    transition: background 0.15s, color 0.15s;
+    box-shadow: var(--shadow-sm);
 }
 
 .back-button:hover {
-    background-color: #e0e0e0;
+    background: var(--bg-hover);
+    color: var(--text);
+    border-color: transparent;
 }
 
+/* ---- Empty state ---- */
 .archive-empty {
     text-align: center;
-    padding: 60px 20px;
-    color: #666;
+    padding: 64px 20px;
+    color: var(--text-2);
 }
 
 .archive-empty p {
-    margin: 10px 0;
+    margin: 8px 0;
     font-size: 16px;
 }
 
 .archive-empty-subtitle {
     font-size: 14px;
-    color: #999;
+    color: var(--text-3);
 }
 
+/* ---- List ---- */
 .archive-list {
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: 8px;
 }
 
 .archive-item {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 20px;
-    background-color: white;
-    border: 1px solid #e0e0e0;
-    border-radius: 8px;
+    padding: 18px 20px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
     cursor: pointer;
-    transition: all 0.2s;
+    transition: box-shadow 0.15s, border-color 0.15s, transform 0.15s;
+    box-shadow: var(--shadow-sm);
 }
 
 .archive-item:hover {
-    border-color: #4a90e2;
-    box-shadow: 0 2px 8px rgba(74, 144, 226, 0.1);
-    transform: translateY(-2px);
+    border-color: var(--accent);
+    box-shadow: var(--shadow-md);
+    transform: translateY(-1px);
 }
 
 .archive-item-content {
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 6px;
     flex: 1;
 }
 
 .archive-item-date {
-    font-size: 16px;
+    font-size: 15px;
     font-weight: 600;
-    color: #333;
-    text-align: left;
+    color: var(--text);
+    letter-spacing: -0.01em;
 }
 
 .archive-item-stats {
     display: flex;
     align-items: center;
-    gap: 10px;
-    font-size: 14px;
-    color: #666;
-    text-align: left;
+    gap: 8px;
+    font-size: 13px;
+    color: var(--text-2);
+}
+
+.archive-item-stats span {
+    display: inline-flex;
+    align-items: center;
 }
 
 .archive-item-arrow {
-    font-size: 20px;
-    color: #4a90e2;
+    font-size: 18px;
+    color: var(--text-3);
+    transition: color 0.15s, transform 0.15s;
+    margin-left: 12px;
 }
 
-@media (prefers-color-scheme: dark) {
-    .archive-view {
-        color: #f6f6f6;
-    }
-
-    .archive-header h1 {
-        color: #f6f6f6;
-    }
-
-    .back-button {
-        background-color: #2f2f2f;
-        color: #f6f6f6;
-        border-color: #444;
-    }
-
-    .back-button:hover {
-        background-color: #3f3f3f;
-    }
-
-    .archive-empty {
-        color: #aaa;
-    }
-
-    .archive-empty-subtitle {
-        color: #888;
-    }
-
-    .archive-item {
-        background-color: #1f1f1f;
-        border-color: #444;
-    }
-
-    .archive-item:hover {
-        border-color: #24c8db;
-        box-shadow: 0 2px 8px rgba(36, 200, 219, 0.1);
-    }
-
-    .archive-item-date {
-        color: #f6f6f6;
-    }
-
-    .archive-item-stats {
-        color: #aaa;
-    }
-
-    .archive-item-arrow {
-        color: #24c8db;
-    }
+.archive-item:hover .archive-item-arrow {
+    color: var(--accent);
+    transform: translateX(2px);
 }
