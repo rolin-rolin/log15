@@ -22,6 +22,9 @@ export default function SummaryView({ onBack, date }: SummaryViewProps) {
     const [error, setError] = useState<string | null>(null);
     const [isArchived, setIsArchived] = useState(false);
 
+    // Status filter for workblock tabs
+    const [statusFilter, setStatusFilter] = useState<"all" | "active" | "completed" | "cancelled">("all");
+
     // Name/notes editing state
     const [editingName, setEditingName] = useState(false);
     const [editingNotes, setEditingNotes] = useState(false);
@@ -68,6 +71,20 @@ export default function SummaryView({ onBack, date }: SummaryViewProps) {
             console.error("Failed to save name/notes:", err);
         }
     };
+
+    // Reset active tab if the current workblock gets filtered out
+    useEffect(() => {
+        if (!vizData || !activeTab.startsWith("workblock-")) return;
+        const id = parseInt(activeTab.replace("workblock-", ""));
+        const statusOrder: Record<string, number> = { active: 0, completed: 1, cancelled: 2 };
+        const sorted = [...vizData.workblocks].sort(
+            (a, b) => (statusOrder[a.status ?? "completed"] ?? 1) - (statusOrder[b.status ?? "completed"] ?? 1)
+        );
+        const filtered = statusFilter === "all" ? sorted : sorted.filter(wb => wb.status === statusFilter);
+        if (!filtered.find(wb => wb.id === id)) {
+            setActiveTab(filtered[0] ? `workblock-${filtered[0].id}` : "aggregate");
+        }
+    }, [statusFilter]);
 
     const loadSummaryData = async () => {
         setLoading(true);
@@ -168,6 +185,14 @@ export default function SummaryView({ onBack, date }: SummaryViewProps) {
     const hasWorkblocks = vizData.workblocks.length > 0;
     const hasAggregate = vizData.daily_aggregate.total_workblocks > 0;
 
+    const statusOrder: Record<string, number> = { active: 0, completed: 1, cancelled: 2 };
+    const sortedWorkblocks = [...vizData.workblocks].sort(
+        (a, b) => (statusOrder[a.status ?? "completed"] ?? 1) - (statusOrder[b.status ?? "completed"] ?? 1)
+    );
+    const filteredWorkblocks = statusFilter === "all"
+        ? sortedWorkblocks
+        : sortedWorkblocks.filter(wb => wb.status === statusFilter);
+
     return (
         <div className="summary-view">
             <div className="summary-header">
@@ -259,25 +284,55 @@ export default function SummaryView({ onBack, date }: SummaryViewProps) {
             })()}
 
             {hasWorkblocks && (
-                <div className="tabs-container">
-                    {hasAggregate && (
-                        <button
-                            className={`tab-button ${activeTab === "aggregate" ? "active" : ""}`}
-                            onClick={() => setActiveTab("aggregate")}
+                <>
+                    <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "8px", flexWrap: "wrap" }}>
+                        <label style={{ fontSize: "13px", color: "#666", fontWeight: 500 }}>Filter:</label>
+                        <select
+                            value={statusFilter}
+                            onChange={e => setStatusFilter(e.target.value as typeof statusFilter)}
+                            style={{
+                                padding: "4px 8px",
+                                fontSize: "13px",
+                                borderRadius: "6px",
+                                border: "1px solid #ccc",
+                                background: "transparent",
+                                cursor: "pointer",
+                            }}
                         >
-                            Daily Aggregate
-                        </button>
-                    )}
-                    {vizData.workblocks.map((wb, index) => (
-                        <button
-                            key={wb.id}
-                            className={`tab-button ${activeTab === `workblock-${wb.id}` ? "active" : ""}`}
-                            onClick={() => setActiveTab(`workblock-${wb.id}`)}
-                        >
-                            Workblock #{index + 1}
-                        </button>
-                    ))}
-                </div>
+                            <option value="all">All ({vizData.workblocks.length})</option>
+                            <option value="active">Active ({vizData.workblocks.filter(w => w.status === "active").length})</option>
+                            <option value="completed">Completed ({vizData.workblocks.filter(w => w.status === "completed").length})</option>
+                            <option value="cancelled">Cancelled ({vizData.workblocks.filter(w => w.status === "cancelled").length})</option>
+                        </select>
+                    </div>
+                    <div className="tabs-container">
+                        {hasAggregate && (
+                            <button
+                                className={`tab-button ${activeTab === "aggregate" ? "active" : ""}`}
+                                onClick={() => setActiveTab("aggregate")}
+                            >
+                                Daily Aggregate
+                            </button>
+                        )}
+                        {filteredWorkblocks.map((wb) => (
+                            <button
+                                key={wb.id}
+                                className={`tab-button ${activeTab === `workblock-${wb.id}` ? "active" : ""}`}
+                                onClick={() => setActiveTab(`workblock-${wb.id}`)}
+                            >
+                                {wb.name ? wb.name : `Workblock #${sortedWorkblocks.indexOf(wb) + 1}`}
+                                {wb.status === "cancelled" && (
+                                    <span style={{ marginLeft: "4px", fontSize: "11px", opacity: 0.7 }}>✕</span>
+                                )}
+                            </button>
+                        ))}
+                        {filteredWorkblocks.length === 0 && (
+                            <span style={{ fontSize: "13px", color: "#999", padding: "6px 0" }}>
+                                No workblocks match this filter
+                            </span>
+                        )}
+                    </div>
+                </>
             )}
 
             <div className="summary-content">
