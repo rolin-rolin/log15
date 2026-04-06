@@ -80,11 +80,12 @@ impl WindowManager {
             WebviewUrl::App(url_with_interval.into()),
         )
         .title("Log15 - What did you do?")
-        .inner_size(300.0, 180.0) // Increased height for summary view
+        .inner_size(300.0, 180.0)
         .decorations(false)
         .always_on_top(true)
+        .visible_on_all_workspaces(true)
         .skip_taskbar(true)
-        .visible(true) // Start visible - we'll position it immediately
+        .visible(true)
         .build()
         .map_err(|e| {
             eprintln!("[WINDOW_MGR] Failed to create window: {}", e);
@@ -93,38 +94,31 @@ impl WindowManager {
         
         println!("[WINDOW_MGR] Window created successfully");
 
-        // Position window at top-right of screen
-        // Wait a moment for window to be ready before positioning
+        // Position window at top-right of the user's active screen.
+        // Use the main window's monitor so the popup appears where the user is working,
+        // not on whichever monitor/space Log15 happens to live on.
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-        
-        if let Ok(monitor) = window.current_monitor() {
-            if let Some(monitor) = monitor {
-                let screen_size = monitor.size();
-                // Convert physical size to logical size (accounting for DPI scaling)
-                let scale_factor = monitor.scale_factor();
-                let logical_width = screen_size.width as f64 / scale_factor;
-                let logical_height = screen_size.height as f64 / scale_factor;
-                
-                // Use default size for positioning
-                let window_width = 300.0;
-                let window_height = 180.0;
-                
-                let x = logical_width - window_width - 20.0; // 20px margin from right
-                let y = 20.0; // 20px margin from top
-                
-                println!("[WINDOW_MGR] Positioning window at logical ({}, {}) on screen logical size ({}, {}), scale_factor: {}", 
-                    x, y, logical_width, logical_height, scale_factor);
-                
-                let pos_result = window.set_position(tauri::LogicalPosition::new(x, y));
-                match pos_result {
-                    Ok(_) => println!("[WINDOW_MGR] Window positioned successfully"),
-                    Err(e) => eprintln!("[WINDOW_MGR] Failed to position window: {}", e),
-                }
-            } else {
-                eprintln!("[WINDOW_MGR] No monitor found");
+
+        let monitor = self.app
+            .get_webview_window("main")
+            .and_then(|w| w.current_monitor().ok().flatten())
+            .or_else(|| window.current_monitor().ok().flatten());
+
+        if let Some(monitor) = monitor {
+            let screen_size = monitor.size();
+            let scale_factor = monitor.scale_factor();
+            let logical_width = screen_size.width as f64 / scale_factor;
+
+            let window_width = 300.0;
+            let x = logical_width - window_width - 20.0;
+            let y = 20.0;
+
+            println!("[WINDOW_MGR] Positioning prompt window at ({}, {}) on monitor logical width {}", x, y, logical_width);
+            if let Err(e) = window.set_position(tauri::LogicalPosition::new(x, y)) {
+                eprintln!("[WINDOW_MGR] Failed to position window: {}", e);
             }
         } else {
-            eprintln!("[WINDOW_MGR] Failed to get current monitor");
+            eprintln!("[WINDOW_MGR] No monitor found for positioning");
         }
 
         // Show window with fade-in (handled by frontend CSS)
@@ -213,6 +207,7 @@ impl WindowManager {
         .inner_size(300.0, 240.0)
         .decorations(false)
         .always_on_top(true)
+        .visible_on_all_workspaces(true)
         .skip_taskbar(true)
         .visible(true)
         .build()
@@ -223,28 +218,29 @@ impl WindowManager {
         
         println!("[WINDOW_MGR] Summary-ready window created successfully");
         
-        // Position window at top-right of screen
+        // Position window at top-right of the user's active screen.
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-        
-        if let Ok(monitor) = window.current_monitor() {
-            if let Some(monitor) = monitor {
-                let screen_size = monitor.size();
-                let scale_factor = monitor.scale_factor();
-                let logical_width = screen_size.width as f64 / scale_factor;
-                let logical_height = screen_size.height as f64 / scale_factor;
-                
-                let window_width = 300.0;
-                let window_height = 240.0;
-                
-                let x = logical_width - window_width - 20.0;
-                let y = 20.0;
-                
-                let pos_result = window.set_position(tauri::LogicalPosition::new(x, y));
-                match pos_result {
-                    Ok(_) => println!("[WINDOW_MGR] Summary-ready window positioned successfully"),
-                    Err(e) => eprintln!("[WINDOW_MGR] Failed to position summary-ready window: {}", e),
-                }
+
+        let monitor = self.app
+            .get_webview_window("main")
+            .and_then(|w| w.current_monitor().ok().flatten())
+            .or_else(|| window.current_monitor().ok().flatten());
+
+        if let Some(monitor) = monitor {
+            let screen_size = monitor.size();
+            let scale_factor = monitor.scale_factor();
+            let logical_width = screen_size.width as f64 / scale_factor;
+
+            let window_width = 300.0;
+            let x = logical_width - window_width - 20.0;
+            let y = 20.0;
+
+            println!("[WINDOW_MGR] Positioning summary-ready window at ({}, {}) on monitor logical width {}", x, y, logical_width);
+            if let Err(e) = window.set_position(tauri::LogicalPosition::new(x, y)) {
+                eprintln!("[WINDOW_MGR] Failed to position summary-ready window: {}", e);
             }
+        } else {
+            eprintln!("[WINDOW_MGR] No monitor found for positioning");
         }
         
         window.show().map_err(|e| {
