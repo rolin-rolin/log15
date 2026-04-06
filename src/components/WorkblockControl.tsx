@@ -341,20 +341,25 @@ export default function WorkblockControl({ onNavigateToSummary, onNavigateToArch
                     </div>
                     <button
                         onClick={handleStartWorkblock}
-                        disabled={loading}
+                        disabled={loading || duration === 0}
                         style={{
                             marginTop: "20px",
                             padding: "12px 24px",
-                            backgroundColor: "#4caf50",
+                            backgroundColor: duration === 0 ? "#aaa" : "#4caf50",
                             color: "white",
                             border: "none",
                             borderRadius: "5px",
                             fontSize: "16px",
-                            cursor: loading ? "not-allowed" : "pointer",
+                            cursor: loading || duration === 0 ? "not-allowed" : "pointer",
                         }}
                     >
                         {loading ? "Starting..." : "Start Workblock"}
                     </button>
+                    {duration === 0 && (
+                        <p style={{ marginTop: "8px", fontSize: "13px", color: "#888" }}>
+                            Minimum duration is 15 minutes
+                        </p>
+                    )}
                 </div>
             )}
 
