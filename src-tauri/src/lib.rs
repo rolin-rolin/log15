@@ -11,6 +11,7 @@ use db::{
     add_interval, update_interval_words, get_intervals_by_workblock, get_current_interval,
     check_and_reset_daily, archive_all_unarchived_dates, get_archived_day, get_all_archived_dates, get_today_date,
     generate_workblock_visualization, generate_daily_aggregate, generate_daily_visualization_data,
+    delete_day,
 };
 use timer::TimerManager;
 use window_manager::WindowManager;
@@ -317,6 +318,11 @@ fn get_all_archived_dates_cmd(app: tauri::AppHandle) -> Result<Vec<DailyArchive>
     get_all_archived_dates(&app).map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+fn delete_day_cmd(app: tauri::AppHandle, date: String) -> Result<(), String> {
+    delete_day(&app, &date).map_err(|e| e.to_string())
+}
+
 // Visualization commands
 #[tauri::command]
 fn get_workblock_visualization(app: tauri::AppHandle, workblock_id: i64) -> Result<String, String> {
@@ -460,6 +466,7 @@ pub fn run() {
             show_prompt_window_cmd,
             hide_prompt_window_cmd,
             update_workblock_name_notes_cmd,
+            delete_day_cmd,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

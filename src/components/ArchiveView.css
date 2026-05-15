@@ -110,14 +110,95 @@
     align-items: center;
 }
 
+.archive-item-right {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-shrink: 0;
+}
+
 .archive-item-arrow {
     font-size: 18px;
     color: var(--text-3);
     transition: color 0.15s, transform 0.15s;
-    margin-left: 12px;
+    margin-left: 4px;
 }
 
 .archive-item:hover .archive-item-arrow {
     color: var(--accent);
     transform: translateX(2px);
+}
+
+.archive-delete-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    padding: 0;
+    background: transparent;
+    border: none;
+    border-radius: var(--radius-sm);
+    color: var(--text-3);
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.15s, background 0.15s, color 0.15s;
+}
+
+.archive-item:hover .archive-delete-btn {
+    opacity: 1;
+}
+
+.archive-delete-btn:hover {
+    background: rgba(220, 60, 60, 0.12);
+    color: #e05252;
+}
+
+/* ---- Inline delete confirmation ---- */
+.archive-delete-confirm {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 2px 0;
+}
+
+.archive-delete-confirm-text {
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text);
+    flex: 1;
+}
+
+.archive-confirm-yes,
+.archive-confirm-no {
+    padding: 5px 14px;
+    border-radius: var(--radius-sm);
+    font-size: 13px;
+    font-weight: 500;
+    font-family: inherit;
+    cursor: pointer;
+    border: 1px solid var(--border);
+    transition: background 0.15s, color 0.15s;
+}
+
+.archive-confirm-yes {
+    background: #e05252;
+    color: #fff;
+    border-color: #e05252;
+}
+
+.archive-confirm-yes:hover {
+    background: #c94040;
+    border-color: #c94040;
+}
+
+.archive-confirm-no {
+    background: var(--bg-card);
+    color: var(--text-2);
+}
+
+.archive-confirm-no:hover {
+    background: var(--bg-hover);
+    color: var(--text);
 }

@@ -357,7 +357,48 @@ pub fn update_workblock_name_notes(
         "UPDATE workblocks SET name = ?1, notes = ?2 WHERE id = ?3",
         params![name, notes, workblock_id],
     )?;
-    get_workblock_by_id(app, workblock_id)
+
+    let workblock = get_workblock_by_id(app, workblock_id)?;
+
+    // If this workblock belongs to an archived day, patch the frozen visualization_data
+    // so the name/notes persist when the archive is re-loaded.
+    let date = &workblock.date;
+    let archive_row: Option<String> = conn
+        .query_row(
+            "SELECT visualization_data FROM daily_archives WHERE date = ?1",
+            params![date],
+            |row| row.get(0),
+        )
+        .ok()
+        .flatten();
+
+    if let Some(json) = archive_row {
+        if let Ok(mut viz) = serde_json::from_str::<serde_json::Value>(&json) {
+            if let Some(workblocks) = viz.get_mut("workblocks").and_then(|v| v.as_array_mut()) {
+                for wb in workblocks.iter_mut() {
+                    if wb.get("id").and_then(|v| v.as_i64()) == Some(workblock_id) {
+                        match &name {
+                            Some(n) => { wb["name"] = serde_json::Value::String(n.clone()); }
+                            None => { wb["name"] = serde_json::Value::Null; }
+                        }
+                        match &notes {
+                            Some(n) => { wb["notes"] = serde_json::Value::String(n.clone()); }
+                            None => { wb["notes"] = serde_json::Value::Null; }
+                        }
+                        break;
+                    }
+                }
+            }
+            if let Ok(patched_json) = serde_json::to_string(&viz) {
+                let _ = conn.execute(
+                    "UPDATE daily_archives SET visualization_data = ?1 WHERE date = ?2",
+                    params![patched_json, date],
+                );
+            }
+        }
+    }
+
+    Ok(workblock)
 }
 
 /// Get workblock by ID
@@ -724,6 +765,14 @@ pub fn get_all_archived_dates(app: &AppHandle) -> Result<Vec<DailyArchive>> {
     }
     
     Ok(archives)
+}
+
+/// Delete all data for a given date (daily_archive + workblocks + intervals via CASCADE)
+pub fn delete_day(app: &AppHandle, date: &str) -> Result<()> {
+    let conn = get_db_connection(app)?;
+    conn.execute("DELETE FROM daily_archives WHERE date = ?1", params![date])?;
+    conn.execute("DELETE FROM workblocks WHERE date = ?1", params![date])?;
+    Ok(())
 }
 
 /// Get archived day data
