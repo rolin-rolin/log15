@@ -94,29 +94,13 @@ impl WindowManager {
         
         println!("[WINDOW_MGR] Window created successfully");
 
-        // Position window at top-right of the user's active screen.
-        // Use the main window's monitor so the popup appears where the user is working,
-        // not on whichever monitor/space Log15 happens to live on.
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
-        let monitor = self.app
-            .get_webview_window("main")
-            .and_then(|w| w.current_monitor().ok().flatten())
+        let monitor = self.cursor_monitor()
             .or_else(|| window.current_monitor().ok().flatten());
 
         if let Some(monitor) = monitor {
-            let screen_size = monitor.size();
-            let scale_factor = monitor.scale_factor();
-            let logical_width = screen_size.width as f64 / scale_factor;
-
-            let window_width = 300.0;
-            let x = logical_width - window_width - 20.0;
-            let y = 20.0;
-
-            println!("[WINDOW_MGR] Positioning prompt window at ({}, {}) on monitor logical width {}", x, y, logical_width);
-            if let Err(e) = window.set_position(tauri::LogicalPosition::new(x, y)) {
-                eprintln!("[WINDOW_MGR] Failed to position window: {}", e);
-            }
+            self.position_top_right(&window, &monitor, 300.0);
         } else {
             eprintln!("[WINDOW_MGR] No monitor found for positioning");
         }
@@ -218,27 +202,13 @@ impl WindowManager {
         
         println!("[WINDOW_MGR] Summary-ready window created successfully");
         
-        // Position window at top-right of the user's active screen.
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
-        let monitor = self.app
-            .get_webview_window("main")
-            .and_then(|w| w.current_monitor().ok().flatten())
+        let monitor = self.cursor_monitor()
             .or_else(|| window.current_monitor().ok().flatten());
 
         if let Some(monitor) = monitor {
-            let screen_size = monitor.size();
-            let scale_factor = monitor.scale_factor();
-            let logical_width = screen_size.width as f64 / scale_factor;
-
-            let window_width = 300.0;
-            let x = logical_width - window_width - 20.0;
-            let y = 20.0;
-
-            println!("[WINDOW_MGR] Positioning summary-ready window at ({}, {}) on monitor logical width {}", x, y, logical_width);
-            if let Err(e) = window.set_position(tauri::LogicalPosition::new(x, y)) {
-                eprintln!("[WINDOW_MGR] Failed to position summary-ready window: {}", e);
-            }
+            self.position_top_right(&window, &monitor, 300.0);
         } else {
             eprintln!("[WINDOW_MGR] No monitor found for positioning");
         }
@@ -322,6 +292,32 @@ impl WindowManager {
         Ok(())
     }
     
+    /// Find the monitor the cursor is currently on, falling back to the primary monitor.
+    fn cursor_monitor(&self) -> Option<tauri::Monitor> {
+        let cursor = self.app.cursor_position().ok()?;
+        let monitors = self.app.available_monitors().ok()?;
+        monitors.into_iter().find(|m| {
+            let pos = m.position();
+            let size = m.size();
+            cursor.x >= pos.x as f64
+                && cursor.x < (pos.x as f64 + size.width as f64)
+                && cursor.y >= pos.y as f64
+                && cursor.y < (pos.y as f64 + size.height as f64)
+        })
+    }
+
+    /// Position a window in the top-right corner of the given monitor.
+    fn position_top_right(&self, window: &tauri::WebviewWindow, monitor: &tauri::Monitor, window_width: f64) {
+        let pos = monitor.position();
+        let size = monitor.size();
+        let scale = monitor.scale_factor();
+        let x = pos.x + size.width as i32 - (window_width * scale) as i32 - (20.0 * scale) as i32;
+        let y = pos.y + (20.0 * scale) as i32;
+        if let Err(e) = window.set_position(tauri::PhysicalPosition::new(x, y)) {
+            eprintln!("[WINDOW_MGR] Failed to position window: {}", e);
+        }
+    }
+
     /// Check if summary window is currently showing
     pub async fn is_summary_ready(&self) -> bool {
         *self.is_summary_ready.lock().await
