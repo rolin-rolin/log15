@@ -1,8 +1,37 @@
 // Window manager for overlay prompt windows
 
 use tauri::{AppHandle, Manager, Emitter, WebviewUrl, WebviewWindowBuilder};
+use tauri_plugin_notification::NotificationExt;
 use std::sync::Arc;
 use tokio::sync::Mutex;
+
+/// Returns true if the frontmost macOS app's window is in full-screen mode.
+#[cfg(target_os = "macos")]
+fn is_fullscreen_active() -> bool {
+    let output = std::process::Command::new("osascript")
+        .arg("-e")
+        .arg(
+            r#"tell application "System Events"
+                try
+                    set frontApp to first process whose frontmost is true
+                    set w to first window of frontApp
+                    return value of attribute "AXFullScreen" of w
+                on error
+                    return false
+                end try
+            end tell"#,
+        )
+        .output();
+    match output {
+        Ok(o) => String::from_utf8_lossy(&o.stdout).trim() == "true",
+        Err(_) => false,
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn is_fullscreen_active() -> bool {
+    false
+}
 
 pub struct WindowManager {
     app: AppHandle,
@@ -140,6 +169,16 @@ impl WindowManager {
         // Store window in state AFTER everything is set up
         let mut prompt = self.prompt_window.lock().await;
         *prompt = Some(window);
+
+        // Send a native notification so the user is alerted even in full-screen mode.
+        if is_fullscreen_active() {
+            let _ = self.app
+                .notification()
+                .builder()
+                .title("Log15 — Time to log!")
+                .body("15 minutes is up. What did you work on?")
+                .show();
+        }
 
         Ok(())
     }
