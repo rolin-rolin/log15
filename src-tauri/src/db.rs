@@ -1,119 +1,142 @@
 use rusqlite::{Connection, Result, params};
 use std::path::PathBuf;
 use tauri::{AppHandle, Manager};
-use chrono::{DateTime, Local};
+use chrono::Local;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-/// Get the database path for the application
 fn get_db_path(app: &AppHandle) -> PathBuf {
     let app_data_dir = app
         .path()
         .app_data_dir()
         .expect("Failed to get app data directory");
-    
     std::fs::create_dir_all(&app_data_dir).expect("Failed to create app data directory");
     app_data_dir.join("log15.db")
 }
 
-/// Initialize the SQLite database and create necessary tables
 pub fn init_db(app: &AppHandle) -> Result<Connection> {
     let db_path = get_db_path(app);
     let conn = Connection::open(&db_path)?;
-    
-    // Create workblocks table
+
+    conn.execute("PRAGMA foreign_keys = ON", [])?;
+
+    // Create sessions table
     conn.execute(
-        "CREATE TABLE IF NOT EXISTS workblocks (
+        "CREATE TABLE IF NOT EXISTS sessions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             date TEXT NOT NULL,
             start_time DATETIME NOT NULL,
             end_time DATETIME,
-            duration_minutes INTEGER,
-            duration_set_minutes INTEGER,
-            status TEXT NOT NULL,
-            is_archived BOOLEAN DEFAULT 0,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            status TEXT NOT NULL DEFAULT 'active'
         )",
         [],
     )?;
 
-    // Lightweight migration for older DBs: add duration_set_minutes if missing
-    // (we keep duration_minutes as the actual worked duration, and duration_set_minutes as the user-selected duration)
-    let mut has_duration_set = false;
-    {
-        let mut stmt = conn.prepare("PRAGMA table_info(workblocks)")?;
-        let columns = stmt.query_map([], |row| row.get::<_, String>(1))?;
-        for col in columns {
-            if col? == "duration_set_minutes" {
-                has_duration_set = true;
-                break;
-            }
-        }
-    } // ensure stmt is dropped before returning conn
-    if !has_duration_set {
+    // Migrate from workblocks → sessions if needed
+    let sessions_empty = conn.query_row(
+        "SELECT COUNT(*) FROM sessions", [], |r| r.get::<_, i64>(0),
+    ).unwrap_or(0) == 0;
+
+    let workblocks_exist = conn.query_row(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='workblocks'",
+        [], |r| r.get::<_, i64>(0),
+    ).unwrap_or(0) > 0;
+
+    if sessions_empty && workblocks_exist {
         conn.execute(
-            "ALTER TABLE workblocks ADD COLUMN duration_set_minutes INTEGER",
-            [],
-        )?;
-        // Best-effort backfill: for existing rows we no longer know the originally-set duration
-        // if duration_minutes was overwritten on completion/cancel. Use duration_minutes as fallback.
-        conn.execute(
-            "UPDATE workblocks SET duration_set_minutes = duration_minutes WHERE duration_set_minutes IS NULL",
+            "INSERT INTO sessions (id, date, start_time, end_time, status)
+             SELECT id, date, start_time, end_time,
+                 CASE WHEN status IN ('completed', 'cancelled') THEN 'stopped' ELSE 'active' END
+             FROM workblocks",
             [],
         )?;
     }
-    
-    // Lightweight migration: add name and notes columns if missing
-    let _ = conn.execute("ALTER TABLE workblocks ADD COLUMN name TEXT", []);
-    let _ = conn.execute("ALTER TABLE workblocks ADD COLUMN notes TEXT", []);
 
-    // Create intervals table
-    conn.execute(
-        "CREATE TABLE IF NOT EXISTS intervals (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            workblock_id INTEGER NOT NULL,
-            interval_number INTEGER NOT NULL,
-            start_time DATETIME NOT NULL,
-            end_time DATETIME,
-            words TEXT,
-            status TEXT NOT NULL,
-            recorded_at DATETIME,
-            FOREIGN KEY (workblock_id) REFERENCES workblocks(id) ON DELETE CASCADE
-        )",
-        [],
-    )?;
-    
+    // Create or migrate intervals table
+    let intervals_exist = conn.query_row(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='intervals'",
+        [], |r| r.get::<_, i64>(0),
+    ).unwrap_or(0) > 0;
+
+    if !intervals_exist {
+        conn.execute(
+            "CREATE TABLE intervals (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id INTEGER NOT NULL,
+                interval_number INTEGER NOT NULL,
+                start_time DATETIME NOT NULL,
+                end_time DATETIME,
+                words TEXT,
+                status TEXT NOT NULL,
+                recorded_at DATETIME,
+                FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+            )",
+            [],
+        )?;
+    } else {
+        // Check if old schema (workblock_id) or new (session_id)
+        let has_session_id = {
+            let mut stmt = conn.prepare("PRAGMA table_info(intervals)")?;
+            let mut found = false;
+            let cols = stmt.query_map([], |r| r.get::<_, String>(1))?;
+            for col in cols {
+                if col? == "session_id" { found = true; break; }
+            }
+            found
+        };
+
+        if !has_session_id {
+            conn.execute_batch(
+                "CREATE TABLE intervals_new (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_id INTEGER NOT NULL,
+                    interval_number INTEGER NOT NULL,
+                    start_time DATETIME NOT NULL,
+                    end_time DATETIME,
+                    words TEXT,
+                    status TEXT NOT NULL,
+                    recorded_at DATETIME,
+                    FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+                );
+                INSERT INTO intervals_new
+                    (id, session_id, interval_number, start_time, end_time, words, status, recorded_at)
+                    SELECT id, workblock_id, interval_number, start_time, end_time, words, status, recorded_at
+                    FROM intervals;
+                DROP TABLE intervals;
+                ALTER TABLE intervals_new RENAME TO intervals;"
+            )?;
+        }
+    }
+
     // Create daily_archives table
     conn.execute(
         "CREATE TABLE IF NOT EXISTS daily_archives (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             date TEXT NOT NULL UNIQUE,
-            total_workblocks INTEGER DEFAULT 0,
+            total_sessions INTEGER DEFAULT 0,
             total_minutes INTEGER DEFAULT 0,
             visualization_data TEXT,
             archived_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )",
         [],
     )?;
-    
-    // Create indexes for better query performance
+
+    // Migrate daily_archives: add total_sessions column if old schema
+    let _ = conn.execute("ALTER TABLE daily_archives ADD COLUMN total_sessions INTEGER DEFAULT 0", []);
     conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_workblocks_date ON workblocks(date)",
+        "UPDATE daily_archives SET total_sessions = COALESCE(total_workblocks, 0)
+         WHERE (total_sessions IS NULL OR total_sessions = 0) AND total_workblocks IS NOT NULL",
         [],
     )?;
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_workblocks_status ON workblocks(status)",
-        [],
-    )?;
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_intervals_workblock_id ON intervals(workblock_id)",
-        [],
-    )?;
-    
+
+    // Indexes
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_sessions_date ON sessions(date)", [])?;
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status)", [])?;
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_intervals_session_id ON intervals(session_id)", [])?;
+
     Ok(conn)
 }
 
-/// Get a database connection
 pub fn get_db_connection(app: &AppHandle) -> Result<Connection> {
     let db_path = get_db_path(app);
     Connection::open(&db_path)
@@ -123,57 +146,35 @@ pub fn get_db_connection(app: &AppHandle) -> Result<Connection> {
 // Data Models
 // ============================================================================
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct Workblock {
-    pub id: Option<i64>,
-    pub date: String,  // YYYY-MM-DD format
-    pub start_time: String,  // ISO 8601 format
-    pub end_time: Option<String>,
-    pub duration_minutes: Option<i32>,
-    pub duration_set_minutes: Option<i32>,
-    pub status: WorkblockStatus,
-    pub is_archived: bool,
-    pub created_at: Option<String>,
-    pub name: Option<String>,
-    pub notes: Option<String>,
-}
-
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
-pub enum WorkblockStatus {
+pub enum SessionStatus {
     Active,
-    Completed,
-    Cancelled,
+    Stopped,
 }
 
-impl WorkblockStatus {
+impl SessionStatus {
     pub fn as_str(&self) -> &str {
         match self {
-            WorkblockStatus::Active => "active",
-            WorkblockStatus::Completed => "completed",
-            WorkblockStatus::Cancelled => "cancelled",
+            SessionStatus::Active => "active",
+            SessionStatus::Stopped => "stopped",
         }
     }
-    
+
     pub fn from_str(s: &str) -> Self {
         match s {
-            "active" => WorkblockStatus::Active,
-            "completed" => WorkblockStatus::Completed,
-            "cancelled" => WorkblockStatus::Cancelled,
-            _ => WorkblockStatus::Active,
+            "active" => SessionStatus::Active,
+            _ => SessionStatus::Stopped,
         }
     }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct Interval {
+pub struct Session {
     pub id: Option<i64>,
-    pub workblock_id: i64,
-    pub interval_number: i32,
-    pub start_time: String,  // ISO 8601 format
+    pub date: String,
+    pub start_time: String,
     pub end_time: Option<String>,
-    pub words: Option<String>,
-    pub status: IntervalStatus,
-    pub recorded_at: Option<String>,
+    pub status: SessionStatus,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
@@ -191,7 +192,7 @@ impl IntervalStatus {
             IntervalStatus::AutoAway => "auto_away",
         }
     }
-    
+
     pub fn from_str(s: &str) -> Self {
         match s {
             "pending" => IntervalStatus::Pending,
@@ -203,283 +204,141 @@ impl IntervalStatus {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct Interval {
+    pub id: Option<i64>,
+    pub session_id: i64,
+    pub interval_number: i32,
+    pub start_time: String,
+    pub end_time: Option<String>,
+    pub words: Option<String>,
+    pub status: IntervalStatus,
+    pub recorded_at: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct DailyArchive {
     pub id: Option<i64>,
-    pub date: String,  // YYYY-MM-DD format
-    pub total_workblocks: i32,
+    pub date: String,
+    pub total_sessions: i32,
     pub total_minutes: i32,
-    pub visualization_data: Option<String>,  // JSON string
+    pub visualization_data: Option<String>,
     pub archived_at: Option<String>,
 }
 
 // ============================================================================
-// Workblock Operations
+// Session Operations
 // ============================================================================
 
-/// Create a new workblock
-pub fn create_workblock(app: &AppHandle, duration_minutes: i32) -> Result<Workblock> {
+pub fn create_session(app: &AppHandle) -> Result<Session> {
     let conn = get_db_connection(app)?;
     let now = Local::now();
     let date = now.format("%Y-%m-%d").to_string();
     let start_time = now.to_rfc3339();
-    
+
     conn.execute(
-        "INSERT INTO workblocks (date, start_time, duration_minutes, duration_set_minutes, status, is_archived)
-         VALUES (?1, ?2, ?3, ?4, ?5, 0)",
-        params![date, start_time, duration_minutes, duration_minutes, WorkblockStatus::Active.as_str()],
+        "INSERT INTO sessions (date, start_time, status) VALUES (?1, ?2, 'active')",
+        params![date, start_time],
     )?;
-    
+
     let id = conn.last_insert_rowid();
-    
-    Ok(Workblock {
-        id: Some(id),
-        date,
-        start_time,
-        end_time: None,
-        duration_minutes: Some(duration_minutes),
-        duration_set_minutes: Some(duration_minutes),
-        status: WorkblockStatus::Active,
-        is_archived: false,
-        created_at: Some(now.to_rfc3339()),
-        name: None,
-        notes: None,
-    })
+    Ok(Session { id: Some(id), date, start_time, end_time: None, status: SessionStatus::Active })
 }
 
-/// Get the active workblock (if any)
-pub fn get_active_workblock(app: &AppHandle) -> Result<Option<Workblock>> {
+pub fn get_active_session(app: &AppHandle) -> Result<Option<Session>> {
     let conn = get_db_connection(app)?;
-    let mut stmt = conn.prepare(
-        "SELECT id, date, start_time, end_time, duration_minutes, duration_set_minutes, status, is_archived, created_at, name, notes
-         FROM workblocks
-         WHERE status = 'active'
-         ORDER BY start_time DESC
-         LIMIT 1"
-    )?;
+    let result = conn.query_row(
+        "SELECT id, date, start_time, end_time, status FROM sessions
+         WHERE status = 'active' ORDER BY start_time DESC LIMIT 1",
+        [],
+        |r| Ok(Session {
+            id: Some(r.get(0)?),
+            date: r.get(1)?,
+            start_time: r.get(2)?,
+            end_time: r.get(3)?,
+            status: SessionStatus::from_str(&r.get::<_, String>(4)?),
+        }),
+    );
 
-    let workblock_result = stmt.query_row([], |row| {
-        Ok(Workblock {
-            id: Some(row.get(0)?),
-            date: row.get(1)?,
-            start_time: row.get(2)?,
-            end_time: row.get(3)?,
-            duration_minutes: row.get(4)?,
-            duration_set_minutes: row.get(5)?,
-            status: WorkblockStatus::from_str(&row.get::<_, String>(6)?),
-            is_archived: row.get(7)?,
-            created_at: row.get(8)?,
-            name: row.get(9)?,
-            notes: row.get(10)?,
-        })
-    });
-    
-    match workblock_result {
-        Ok(workblock) => Ok(Some(workblock)),
+    match result {
+        Ok(s) => Ok(Some(s)),
         Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
         Err(e) => Err(e),
     }
 }
 
-/// Complete a workblock
-pub fn complete_workblock(app: &AppHandle, workblock_id: i64) -> Result<Workblock> {
+pub fn get_session_by_id(app: &AppHandle, session_id: i64) -> Result<Session> {
     let conn = get_db_connection(app)?;
-    let now_end_time = Local::now().to_rfc3339();
-    
-    // Calculate duration.
-    // Important: completion can happen after the final interval ends (e.g. waiting for last prompt/auto-away),
-    // so clamp worked duration to the originally set duration to avoid post-workblock inflation.
-    let workblock = get_workblock_by_id(app, workblock_id)?;
-    let start_time = DateTime::parse_from_rfc3339(&workblock.start_time)
-        .map_err(|e| rusqlite::Error::InvalidColumnType(0, format!("Invalid start_time: {}", e), rusqlite::types::Type::Text))?;
-    let now_end_time_dt = DateTime::parse_from_rfc3339(&now_end_time)
-        .map_err(|e| rusqlite::Error::InvalidColumnType(0, format!("Invalid end_time: {}", e), rusqlite::types::Type::Text))?;
-    let planned_minutes = workblock
-        .duration_set_minutes
-        .or(workblock.duration_minutes)
-        .unwrap_or((now_end_time_dt - start_time).num_minutes() as i32)
-        .max(0);
-
-    // Clamp end timestamp to planned end timestamp so timeline boundaries don't drift
-    // past official workblock completion (e.g. waiting for final auto-away timeout).
-    let planned_end_time_dt = start_time + chrono::Duration::minutes(planned_minutes as i64);
-    let effective_end_time_dt = if now_end_time_dt > planned_end_time_dt {
-        planned_end_time_dt
-    } else {
-        now_end_time_dt
-    };
-    let end_time = effective_end_time_dt.to_rfc3339();
-
-    let elapsed_minutes = (effective_end_time_dt - start_time).num_minutes() as i32;
-    let duration = elapsed_minutes.max(0).min(planned_minutes);
-    
-    conn.execute(
-        "UPDATE workblocks 
-         SET end_time = ?1, duration_minutes = ?2, status = 'completed'
-         WHERE id = ?3",
-        params![end_time, duration, workblock_id],
-    )?;
-    
-    get_workblock_by_id(app, workblock_id)
+    conn.query_row(
+        "SELECT id, date, start_time, end_time, status FROM sessions WHERE id = ?1",
+        params![session_id],
+        |r| Ok(Session {
+            id: Some(r.get(0)?),
+            date: r.get(1)?,
+            start_time: r.get(2)?,
+            end_time: r.get(3)?,
+            status: SessionStatus::from_str(&r.get::<_, String>(4)?),
+        }),
+    )
 }
 
-/// Cancel a workblock
-pub fn cancel_workblock(app: &AppHandle, workblock_id: i64) -> Result<Workblock> {
+pub fn stop_session(app: &AppHandle, session_id: i64) -> Result<Session> {
     let conn = get_db_connection(app)?;
     let end_time = Local::now().to_rfc3339();
-    
-    // Calculate duration
-    let workblock = get_workblock_by_id(app, workblock_id)?;
-    let start_time = DateTime::parse_from_rfc3339(&workblock.start_time)
-        .map_err(|e| rusqlite::Error::InvalidColumnType(0, format!("Invalid start_time: {}", e), rusqlite::types::Type::Text))?;
-    let end_time_dt = DateTime::parse_from_rfc3339(&end_time)
-        .map_err(|e| rusqlite::Error::InvalidColumnType(0, format!("Invalid end_time: {}", e), rusqlite::types::Type::Text))?;
-    let duration = (end_time_dt - start_time).num_minutes() as i32;
-    
-    conn.execute(
-        "UPDATE workblocks 
-         SET end_time = ?1, duration_minutes = ?2, status = 'cancelled'
-         WHERE id = ?3",
-        params![end_time, duration, workblock_id],
-    )?;
-    
-    get_workblock_by_id(app, workblock_id)
-}
 
-/// Update name and notes for a workblock
-pub fn update_workblock_name_notes(
-    app: &AppHandle,
-    workblock_id: i64,
-    name: Option<String>,
-    notes: Option<String>,
-) -> Result<Workblock> {
-    let conn = get_db_connection(app)?;
+    // Drop any intervals the user never saw (pending means prompt hadn't fired yet)
     conn.execute(
-        "UPDATE workblocks SET name = ?1, notes = ?2 WHERE id = ?3",
-        params![name, notes, workblock_id],
+        "DELETE FROM intervals WHERE session_id = ?1 AND status = 'pending'",
+        params![session_id],
     )?;
 
-    let workblock = get_workblock_by_id(app, workblock_id)?;
+    conn.execute(
+        "UPDATE sessions SET end_time = ?1, status = 'stopped' WHERE id = ?2",
+        params![end_time, session_id],
+    )?;
 
-    // If this workblock belongs to an archived day, patch the frozen visualization_data
-    // so the name/notes persist when the archive is re-loaded.
-    let date = &workblock.date;
-    let archive_row: Option<String> = conn
-        .query_row(
-            "SELECT visualization_data FROM daily_archives WHERE date = ?1",
-            params![date],
-            |row| row.get(0),
-        )
-        .ok()
-        .flatten();
-
-    if let Some(json) = archive_row {
-        if let Ok(mut viz) = serde_json::from_str::<serde_json::Value>(&json) {
-            if let Some(workblocks) = viz.get_mut("workblocks").and_then(|v| v.as_array_mut()) {
-                for wb in workblocks.iter_mut() {
-                    if wb.get("id").and_then(|v| v.as_i64()) == Some(workblock_id) {
-                        match &name {
-                            Some(n) => { wb["name"] = serde_json::Value::String(n.clone()); }
-                            None => { wb["name"] = serde_json::Value::Null; }
-                        }
-                        match &notes {
-                            Some(n) => { wb["notes"] = serde_json::Value::String(n.clone()); }
-                            None => { wb["notes"] = serde_json::Value::Null; }
-                        }
-                        break;
-                    }
-                }
-            }
-            if let Ok(patched_json) = serde_json::to_string(&viz) {
-                let _ = conn.execute(
-                    "UPDATE daily_archives SET visualization_data = ?1 WHERE date = ?2",
-                    params![patched_json, date],
-                );
-            }
-        }
-    }
-
-    Ok(workblock)
+    get_session_by_id(app, session_id)
 }
 
-/// Get workblock by ID
-pub fn get_workblock_by_id(app: &AppHandle, workblock_id: i64) -> Result<Workblock> {
+pub fn get_sessions_by_date(app: &AppHandle, date: &str) -> Result<Vec<Session>> {
     let conn = get_db_connection(app)?;
     let mut stmt = conn.prepare(
-        "SELECT id, date, start_time, end_time, duration_minutes, duration_set_minutes, status, is_archived, created_at, name, notes
-         FROM workblocks
-         WHERE id = ?1"
+        "SELECT id, date, start_time, end_time, status FROM sessions
+         WHERE date = ?1 ORDER BY start_time ASC",
     )?;
 
-    stmt.query_row(params![workblock_id], |row| {
-        Ok(Workblock {
-            id: Some(row.get(0)?),
-            date: row.get(1)?,
-            start_time: row.get(2)?,
-            end_time: row.get(3)?,
-            duration_minutes: row.get(4)?,
-            duration_set_minutes: row.get(5)?,
-            status: WorkblockStatus::from_str(&row.get::<_, String>(6)?),
-            is_archived: row.get(7)?,
-            created_at: row.get(8)?,
-            name: row.get(9)?,
-            notes: row.get(10)?,
-        })
-    })
-}
-
-/// Get all workblocks for a specific date
-pub fn get_workblocks_by_date(app: &AppHandle, date: &str) -> Result<Vec<Workblock>> {
-    let conn = get_db_connection(app)?;
-    let mut stmt = conn.prepare(
-        "SELECT id, date, start_time, end_time, duration_minutes, duration_set_minutes, status, is_archived, created_at, name, notes
-         FROM workblocks
-         WHERE date = ?1
-         ORDER BY start_time ASC"
-    )?;
-
-    let workblock_iter = stmt.query_map(params![date], |row| {
-        Ok(Workblock {
-            id: Some(row.get(0)?),
-            date: row.get(1)?,
-            start_time: row.get(2)?,
-            end_time: row.get(3)?,
-            duration_minutes: row.get(4)?,
-            duration_set_minutes: row.get(5)?,
-            status: WorkblockStatus::from_str(&row.get::<_, String>(6)?),
-            is_archived: row.get(7)?,
-            created_at: row.get(8)?,
-            name: row.get(9)?,
-            notes: row.get(10)?,
+    let iter = stmt.query_map(params![date], |r| {
+        Ok(Session {
+            id: Some(r.get(0)?),
+            date: r.get(1)?,
+            start_time: r.get(2)?,
+            end_time: r.get(3)?,
+            status: SessionStatus::from_str(&r.get::<_, String>(4)?),
         })
     })?;
-    
-    let mut workblocks = Vec::new();
-    for workblock in workblock_iter {
-        workblocks.push(workblock?);
-    }
-    Ok(workblocks)
+
+    let mut sessions = Vec::new();
+    for s in iter { sessions.push(s?); }
+    Ok(sessions)
 }
 
 // ============================================================================
 // Interval Operations
 // ============================================================================
 
-/// Add an interval to a workblock
-pub fn add_interval(app: &AppHandle, workblock_id: i64, interval_number: i32) -> Result<Interval> {
+pub fn add_interval(app: &AppHandle, session_id: i64, interval_number: i32) -> Result<Interval> {
     let conn = get_db_connection(app)?;
     let start_time = Local::now().to_rfc3339();
-    
+
     conn.execute(
-        "INSERT INTO intervals (workblock_id, interval_number, start_time, status)
+        "INSERT INTO intervals (session_id, interval_number, start_time, status)
          VALUES (?1, ?2, ?3, 'pending')",
-        params![workblock_id, interval_number, start_time],
+        params![session_id, interval_number, start_time],
     )?;
-    
+
     let id = conn.last_insert_rowid();
-    
     Ok(Interval {
         id: Some(id),
-        workblock_id,
+        session_id,
         interval_number,
         start_time,
         end_time: None,
@@ -489,7 +348,6 @@ pub fn add_interval(app: &AppHandle, workblock_id: i64, interval_number: i32) ->
     })
 }
 
-/// Update interval with words
 pub fn update_interval_words(
     app: &AppHandle,
     interval_id: i64,
@@ -498,312 +356,254 @@ pub fn update_interval_words(
 ) -> Result<Interval> {
     let conn = get_db_connection(app)?;
     let recorded_at = Local::now().to_rfc3339();
-    
+
     conn.execute(
-        "UPDATE intervals 
-         SET words = ?1, status = ?2, recorded_at = ?3, end_time = ?3
-         WHERE id = ?4",
+        "UPDATE intervals SET words = ?1, status = ?2, recorded_at = ?3, end_time = ?3 WHERE id = ?4",
         params![words, status.as_str(), recorded_at, interval_id],
     )?;
-    
+
     get_interval_by_id(app, interval_id)
 }
 
-/// Get interval by ID
 pub fn get_interval_by_id(app: &AppHandle, interval_id: i64) -> Result<Interval> {
     let conn = get_db_connection(app)?;
-    let mut stmt = conn.prepare(
-        "SELECT id, workblock_id, interval_number, start_time, end_time, words, status, recorded_at
-         FROM intervals
-         WHERE id = ?1"
-    )?;
-    
-    stmt.query_row(params![interval_id], |row| {
-        Ok(Interval {
-            id: Some(row.get(0)?),
-            workblock_id: row.get(1)?,
-            interval_number: row.get(2)?,
-            start_time: row.get(3)?,
-            end_time: row.get(4)?,
-            words: row.get(5)?,
-            status: IntervalStatus::from_str(&row.get::<_, String>(6)?),
-            recorded_at: row.get(7)?,
-        })
-    })
+    conn.query_row(
+        "SELECT id, session_id, interval_number, start_time, end_time, words, status, recorded_at
+         FROM intervals WHERE id = ?1",
+        params![interval_id],
+        |r| Ok(Interval {
+            id: Some(r.get(0)?),
+            session_id: r.get(1)?,
+            interval_number: r.get(2)?,
+            start_time: r.get(3)?,
+            end_time: r.get(4)?,
+            words: r.get(5)?,
+            status: IntervalStatus::from_str(&r.get::<_, String>(6)?),
+            recorded_at: r.get(7)?,
+        }),
+    )
 }
 
-/// Get all intervals for a workblock
-pub fn get_intervals_by_workblock(app: &AppHandle, workblock_id: i64) -> Result<Vec<Interval>> {
+pub fn get_intervals_by_session(app: &AppHandle, session_id: i64) -> Result<Vec<Interval>> {
     let conn = get_db_connection(app)?;
     let mut stmt = conn.prepare(
-        "SELECT id, workblock_id, interval_number, start_time, end_time, words, status, recorded_at
-         FROM intervals
-         WHERE workblock_id = ?1
-         ORDER BY interval_number ASC"
+        "SELECT id, session_id, interval_number, start_time, end_time, words, status, recorded_at
+         FROM intervals WHERE session_id = ?1 ORDER BY interval_number ASC",
     )?;
-    
-    let interval_iter = stmt.query_map(params![workblock_id], |row| {
+
+    let iter = stmt.query_map(params![session_id], |r| {
         Ok(Interval {
-            id: Some(row.get(0)?),
-            workblock_id: row.get(1)?,
-            interval_number: row.get(2)?,
-            start_time: row.get(3)?,
-            end_time: row.get(4)?,
-            words: row.get(5)?,
-            status: IntervalStatus::from_str(&row.get::<_, String>(6)?),
-            recorded_at: row.get(7)?,
+            id: Some(r.get(0)?),
+            session_id: r.get(1)?,
+            interval_number: r.get(2)?,
+            start_time: r.get(3)?,
+            end_time: r.get(4)?,
+            words: r.get(5)?,
+            status: IntervalStatus::from_str(&r.get::<_, String>(6)?),
+            recorded_at: r.get(7)?,
         })
     })?;
-    
+
     let mut intervals = Vec::new();
-    for interval in interval_iter {
-        intervals.push(interval?);
-    }
+    for i in iter { intervals.push(i?); }
     Ok(intervals)
 }
 
-/// Get current interval for active workblock
-pub fn get_current_interval(app: &AppHandle, workblock_id: i64) -> Result<Option<Interval>> {
+pub fn get_current_interval(app: &AppHandle, session_id: i64) -> Result<Option<Interval>> {
     let conn = get_db_connection(app)?;
-    let mut stmt = conn.prepare(
-        "SELECT id, workblock_id, interval_number, start_time, end_time, words, status, recorded_at
-         FROM intervals
-         WHERE workblock_id = ?1 AND status = 'pending'
-         ORDER BY interval_number DESC
-         LIMIT 1"
-    )?;
-    
-    let interval_result = stmt.query_row(params![workblock_id], |row| {
-        Ok(Interval {
-            id: Some(row.get(0)?),
-            workblock_id: row.get(1)?,
-            interval_number: row.get(2)?,
-            start_time: row.get(3)?,
-            end_time: row.get(4)?,
-            words: row.get(5)?,
-            status: IntervalStatus::from_str(&row.get::<_, String>(6)?),
-            recorded_at: row.get(7)?,
-        })
-    });
-    
-    match interval_result {
-        Ok(interval) => Ok(Some(interval)),
+    let result = conn.query_row(
+        "SELECT id, session_id, interval_number, start_time, end_time, words, status, recorded_at
+         FROM intervals WHERE session_id = ?1 AND status = 'pending'
+         ORDER BY interval_number DESC LIMIT 1",
+        params![session_id],
+        |r| Ok(Interval {
+            id: Some(r.get(0)?),
+            session_id: r.get(1)?,
+            interval_number: r.get(2)?,
+            start_time: r.get(3)?,
+            end_time: r.get(4)?,
+            words: r.get(5)?,
+            status: IntervalStatus::from_str(&r.get::<_, String>(6)?),
+            recorded_at: r.get(7)?,
+        }),
+    );
+
+    match result {
+        Ok(i) => Ok(Some(i)),
         Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
         Err(e) => Err(e),
     }
 }
 
 // ============================================================================
-// Daily Operations
+// Daily / Archive Operations
 // ============================================================================
 
-/// Get the date string for today
 pub fn get_today_date() -> String {
     Local::now().format("%Y-%m-%d").to_string()
 }
 
-/// Check if we need to reset for a new day and archive previous day
 pub fn check_and_reset_daily(app: &AppHandle) -> Result<Option<String>> {
     let today = get_today_date();
     let conn = get_db_connection(app)?;
-    
-    // Check if there are any workblocks from previous days that are still active
-    let mut stmt = conn.prepare(
-        "SELECT date FROM workblocks 
-         WHERE status = 'active' AND date != ?1
-         LIMIT 1"
-    )?;
-    
-    let previous_date_result = stmt.query_row(params![today], |row| {
-        Ok(row.get::<_, String>(0)?)
-    });
-    
-    if let Ok(previous_date) = previous_date_result {
-        // Archive the previous day
+
+    // Auto-stop any active sessions from a previous day
+    let result = conn.query_row(
+        "SELECT date FROM sessions WHERE status = 'active' AND date != ?1 LIMIT 1",
+        params![today],
+        |r| r.get::<_, String>(0),
+    );
+
+    if let Ok(previous_date) = result {
         archive_daily_data(app, &previous_date)?;
-        
-        // Mark any active workblocks from previous day as completed
         conn.execute(
-            "UPDATE workblocks 
-             SET status = 'completed', end_time = datetime('now')
+            "UPDATE sessions SET status = 'stopped', end_time = datetime('now')
              WHERE status = 'active' AND date != ?1",
             params![today],
         )?;
-        
         return Ok(Some(previous_date));
     }
-    
-    // Check if we need to archive any dates with unarchived workblocks
-    // This includes yesterday and any older dates that may have been missed
+
+    // Archive any past days that haven't been archived yet
     let mut stmt = conn.prepare(
-        "SELECT DISTINCT date FROM workblocks 
-         WHERE is_archived = 0 AND status = 'completed' AND date != ?1
-         ORDER BY date DESC"
+        "SELECT DISTINCT date FROM sessions
+         WHERE date != ?1 AND date < ?1
+           AND date NOT IN (SELECT date FROM daily_archives)
+         ORDER BY date DESC",
     )?;
-    
-    let unarchived_dates: Vec<String> = stmt.query_map(params![today], |row| {
-        Ok(row.get::<_, String>(0)?)
-    })?.collect::<Result<Vec<_>, _>>()?;
-    
-    if !unarchived_dates.is_empty() {
-        // Archive the most recent unarchived date (closest to today)
-        let date_to_archive = &unarchived_dates[0];
-        archive_daily_data(app, date_to_archive)?;
-        return Ok(Some(date_to_archive.clone()));
+
+    let unarchived: Vec<String> = stmt
+        .query_map(params![today], |r| r.get(0))?
+        .collect::<Result<Vec<_>, _>>()?;
+
+    if let Some(date) = unarchived.into_iter().next() {
+        archive_daily_data(app, &date)?;
+        return Ok(Some(date));
     }
-    
+
     Ok(None)
 }
 
-/// Archive all dates with unarchived workblocks (backfill function)
 pub fn archive_all_unarchived_dates(app: &AppHandle) -> Result<Vec<String>> {
     let today = get_today_date();
     let conn = get_db_connection(app)?;
-    
-    // Get all dates with unarchived workblocks (any status, including cancelled, and not today)
-    // This includes all workblocks from past dates for a holistic overview
+
     let mut stmt = conn.prepare(
-        "SELECT DISTINCT date FROM workblocks 
-         WHERE is_archived = 0 AND date != ?1 AND date < ?1
-         ORDER BY date DESC"
+        "SELECT DISTINCT date FROM sessions
+         WHERE date != ?1 AND date < ?1
+           AND date NOT IN (SELECT date FROM daily_archives)
+         ORDER BY date DESC",
     )?;
-    
-    let unarchived_dates: Vec<String> = stmt.query_map(params![today], |row| {
-        Ok(row.get::<_, String>(0)?)
-    })?.collect::<Result<Vec<_>, _>>()?;
-    
-    let mut archived_dates = Vec::new();
-    for date in &unarchived_dates {
-        match archive_daily_data(app, date) {
-            Ok(_) => {
-                archived_dates.push(date.clone());
-            }
-            Err(e) => {
-                eprintln!("Failed to archive date {}: {}", date, e);
-            }
+
+    let dates: Vec<String> = stmt
+        .query_map(params![today], |r| r.get(0))?
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let mut archived = Vec::new();
+    for date in &dates {
+        if archive_daily_data(app, date).is_ok() {
+            archived.push(date.clone());
         }
     }
-    
-    Ok(archived_dates)
+    Ok(archived)
 }
 
-/// Archive daily data and generate visualization JSON
 pub fn archive_daily_data(app: &AppHandle, date: &str) -> Result<DailyArchive> {
     let conn = get_db_connection(app)?;
-    
-    // Get all workblocks for the date (including non-completed ones)
-    let workblocks = get_workblocks_by_date(app, date)?;
-    
-    if workblocks.is_empty() {
+    let sessions = get_sessions_by_date(app, date)?;
+
+    if sessions.is_empty() {
         return Err(rusqlite::Error::SqliteFailure(
             rusqlite::ffi::Error::new(1),
-            Some("No workblocks found for date".to_string()),
+            Some("No sessions found for date".to_string()),
         ));
     }
-    
-    // Mark all workblocks as archived (including cancelled ones for holistic overview)
-    // Only mark non-cancelled workblocks as completed (preserve cancelled status)
+
     conn.execute(
-        "UPDATE workblocks SET is_archived = 1, status = CASE WHEN status = 'cancelled' THEN 'cancelled' ELSE 'completed' END, end_time = COALESCE(end_time, datetime('now')) WHERE date = ?1",
+        "UPDATE sessions SET status = 'stopped', end_time = COALESCE(end_time, datetime('now'))
+         WHERE date = ?1",
         params![date],
     )?;
-    
-    // Calculate totals
-    let total_workblocks = workblocks.len() as i32;
-    let total_minutes: i32 = workblocks
-        .iter()
-        .map(|wb| wb.duration_minutes.unwrap_or(0))
-        .sum();
-    
-    // Generate visualization data
-    let visualization_data = generate_daily_visualization_data(app, date)?;
-    let visualization_json = serde_json::to_string(&visualization_data)
-        .map_err(|e| rusqlite::Error::InvalidColumnType(0, format!("JSON serialization error: {}", e), rusqlite::types::Type::Text))?;
-    
-    // Insert or update daily archive
+
+    let viz_data = generate_daily_visualization_data(app, date)?;
+    let viz_json = serde_json::to_string(&viz_data)
+        .map_err(|e| rusqlite::Error::InvalidColumnType(0, e.to_string(), rusqlite::types::Type::Text))?;
+
+    let total_sessions = sessions.len() as i32;
+    let total_minutes = viz_data.total_minutes;
+
     conn.execute(
-        "INSERT OR REPLACE INTO daily_archives (date, total_workblocks, total_minutes, visualization_data, archived_at)
+        "INSERT OR REPLACE INTO daily_archives (date, total_sessions, total_minutes, visualization_data, archived_at)
          VALUES (?1, ?2, ?3, ?4, datetime('now'))",
-        params![date, total_workblocks, total_minutes, visualization_json],
+        params![date, total_sessions, total_minutes, viz_json],
     )?;
-    
+
     let id = conn.last_insert_rowid();
-    
     Ok(DailyArchive {
         id: Some(id),
         date: date.to_string(),
-        total_workblocks,
+        total_sessions,
         total_minutes,
-        visualization_data: Some(visualization_json),
+        visualization_data: Some(viz_json),
         archived_at: Some(Local::now().to_rfc3339()),
     })
 }
 
-/// Get all archived dates
-pub fn get_all_archived_dates(app: &AppHandle) -> Result<Vec<DailyArchive>> {
-    let conn = get_db_connection(app)?;
-    let mut stmt = conn.prepare(
-        "SELECT id, date, total_workblocks, total_minutes, visualization_data, archived_at 
-         FROM daily_archives 
-         ORDER BY date DESC"
-    )?;
-    
-    let archive_iter = stmt.query_map([], |row| {
-        Ok(DailyArchive {
-            id: row.get(0)?,
-            date: row.get(1)?,
-            total_workblocks: row.get(2)?,
-            total_minutes: row.get(3)?,
-            visualization_data: row.get(4)?,
-            archived_at: row.get(5)?,
-        })
-    })?;
-    
-    let mut archives = Vec::new();
-    for archive in archive_iter {
-        archives.push(archive?);
-    }
-    
-    Ok(archives)
-}
-
-/// Delete all data for a given date (daily_archive + workblocks + intervals via CASCADE)
-pub fn delete_day(app: &AppHandle, date: &str) -> Result<()> {
-    let conn = get_db_connection(app)?;
-    conn.execute("DELETE FROM daily_archives WHERE date = ?1", params![date])?;
-    conn.execute("DELETE FROM workblocks WHERE date = ?1", params![date])?;
-    Ok(())
-}
-
-/// Get archived day data
 pub fn get_archived_day(app: &AppHandle, date: &str) -> Result<Option<DailyArchive>> {
     let conn = get_db_connection(app)?;
-    let mut stmt = conn.prepare(
-        "SELECT id, date, total_workblocks, total_minutes, visualization_data, archived_at
-         FROM daily_archives
-         WHERE date = ?1"
-    )?;
-    
-    let archive_result = stmt.query_row(params![date], |row| {
-        Ok(DailyArchive {
-            id: Some(row.get(0)?),
-            date: row.get(1)?,
-            total_workblocks: row.get(2)?,
-            total_minutes: row.get(3)?,
-            visualization_data: row.get(4)?,
-            archived_at: row.get(5)?,
-        })
-    });
-    
-    match archive_result {
-        Ok(archive) => Ok(Some(archive)),
+    let result = conn.query_row(
+        "SELECT id, date, COALESCE(total_sessions, total_workblocks, 0), total_minutes, visualization_data, archived_at
+         FROM daily_archives WHERE date = ?1",
+        params![date],
+        |r| Ok(DailyArchive {
+            id: Some(r.get(0)?),
+            date: r.get(1)?,
+            total_sessions: r.get(2)?,
+            total_minutes: r.get(3)?,
+            visualization_data: r.get(4)?,
+            archived_at: r.get(5)?,
+        }),
+    );
+
+    match result {
+        Ok(a) => Ok(Some(a)),
         Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
         Err(e) => Err(e),
     }
 }
 
+pub fn get_all_archived_dates(app: &AppHandle) -> Result<Vec<DailyArchive>> {
+    let conn = get_db_connection(app)?;
+    let mut stmt = conn.prepare(
+        "SELECT id, date, COALESCE(total_sessions, total_workblocks, 0), total_minutes, visualization_data, archived_at
+         FROM daily_archives ORDER BY date DESC",
+    )?;
+
+    let iter = stmt.query_map([], |r| {
+        Ok(DailyArchive {
+            id: r.get(0)?,
+            date: r.get(1)?,
+            total_sessions: r.get(2)?,
+            total_minutes: r.get(3)?,
+            visualization_data: r.get(4)?,
+            archived_at: r.get(5)?,
+        })
+    })?;
+
+    let mut archives = Vec::new();
+    for a in iter { archives.push(a?); }
+    Ok(archives)
+}
+
+pub fn delete_day(app: &AppHandle, date: &str) -> Result<()> {
+    let conn = get_db_connection(app)?;
+    conn.execute("DELETE FROM daily_archives WHERE date = ?1", params![date])?;
+    conn.execute("DELETE FROM sessions WHERE date = ?1", params![date])?;
+    Ok(())
+}
+
 // ============================================================================
-// Visualization Data Generation
+// Visualization Data
 // ============================================================================
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -813,7 +613,6 @@ pub struct TimelineData {
     pub end_time: Option<String>,
     pub words: Option<String>,
     pub duration_minutes: i32,
-    pub workblock_status: Option<String>, // "active", "completed", or "cancelled"
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -824,330 +623,69 @@ pub struct ActivityData {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct WordFrequency {
-    pub word: String,
-    pub count: i32,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct WorkblockVisualization {
-    pub id: i64,
-    pub duration_minutes: i32,
-    pub duration_set_minutes: Option<i32>,
-    pub duration_worked_minutes: Option<i32>,
-    pub status: String, // "active", "completed", or "cancelled"
-    pub name: Option<String>,
-    pub notes: Option<String>,
+pub struct DailyVisualizationData {
+    pub total_sessions: i32,
+    pub total_minutes: i32,
     pub timeline_data: Vec<TimelineData>,
     pub activity_data: Vec<ActivityData>,
-    pub word_frequency: Vec<WordFrequency>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct AggregateTimelineData {
-    pub workblock_id: i64,
-    pub interval_number: i32,
-    pub start_time: String,
-    pub end_time: Option<String>,
-    pub words: Option<String>,
-    pub duration_minutes: i32,
-    pub workblock_status: Option<String>, // "active", "completed", or "cancelled"
-}
+pub fn generate_daily_visualization_data(app: &AppHandle, date: &str) -> Result<DailyVisualizationData> {
+    let sessions = get_sessions_by_date(app, date)?;
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct WorkblockBoundary {
-    pub id: i64,
-    pub start_time: String,
-    pub end_time: Option<String>,
-    pub status: String, // "active", "completed", or "cancelled"
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct DailyAggregate {
-    pub total_workblocks: i32,
-    pub total_minutes: i32,
-    pub timeline_data: Vec<AggregateTimelineData>,
-    pub activity_data: Vec<ActivityData>,
-    pub word_frequency: Vec<WordFrequency>,
-    pub workblock_boundaries: Vec<WorkblockBoundary>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct DailyVisualizationData {
-    pub workblocks: Vec<WorkblockVisualization>,
-    pub daily_aggregate: DailyAggregate,
-}
-
-/// Generate visualization data for a single workblock
-pub fn generate_workblock_visualization(
-    app: &AppHandle,
-    workblock_id: i64,
-) -> Result<WorkblockVisualization> {
-    let workblock = get_workblock_by_id(app, workblock_id)?;
-    let mut intervals = get_intervals_by_workblock(app, workblock_id)?;
-    let is_cancelled = workblock.status == WorkblockStatus::Cancelled;
-    
-    // If cancelled, filter out intervals that start after cancellation time
-    // and identify the last interval to mark as cancelled
-    let cancellation_end_time = if is_cancelled {
-        workblock.end_time.as_ref().and_then(|et| {
-            DateTime::parse_from_rfc3339(et).ok()
-        })
-    } else {
-        None
-    };
-    
-    if let Some(cancel_time) = cancellation_end_time {
-        // Filter out intervals that start after cancellation
-        intervals.retain(|interval| {
-            if let Ok(start_time) = DateTime::parse_from_rfc3339(&interval.start_time) {
-                start_time <= cancel_time
-            } else {
-                true // Keep if we can't parse (shouldn't happen)
-            }
-        });
+    let mut all_intervals: Vec<Interval> = Vec::new();
+    for session in &sessions {
+        if let Some(id) = session.id {
+            all_intervals.extend(get_intervals_by_session(app, id)?);
+        }
     }
-    
-    // Find the last interval number to mark as cancelled (only for cancelled workblocks)
-    let last_interval_number = if is_cancelled && !intervals.is_empty() {
-        intervals.iter().map(|i| i.interval_number).max()
-    } else {
-        None
-    };
-    
-    // Generate timeline data - each interval always represents 15 minutes
-    let timeline_data: Vec<TimelineData> = intervals
+
+    all_intervals.sort_by(|a, b| a.start_time.cmp(&b.start_time));
+
+    // Only include intervals the user saw (recorded or auto_away), not pending ones
+    let timeline_data: Vec<TimelineData> = all_intervals
         .iter()
-        .map(|interval| {
-            // Each interval always represents 15 minutes, regardless of when words were recorded
-            let duration = 15;
-            
-            // Only mark as cancelled if this is the last interval and workblock is cancelled
-            let status = if is_cancelled && last_interval_number == Some(interval.interval_number) {
-                Some("cancelled".to_string())
-            } else {
-                None
-            };
-            
-            TimelineData {
-                interval_number: interval.interval_number,
-                start_time: interval.start_time.clone(),
-                end_time: interval.end_time.clone(),
-                words: interval.words.clone(),
-                duration_minutes: duration,
-                workblock_status: status,
-            }
+        .filter(|i| i.status != IntervalStatus::Pending)
+        .map(|i| TimelineData {
+            interval_number: i.interval_number,
+            start_time: i.start_time.clone(),
+            end_time: i.end_time.clone(),
+            words: i.words.clone(),
+            duration_minutes: 15,
         })
         .collect();
-    
-    let duration_set_minutes = workblock
-        .duration_set_minutes
-        .or(workblock.duration_minutes)
-        .unwrap_or(0);
 
-    // Calculate duration FIRST: for cancelled workblocks, count only completed intervals (exclude the cancelled interval)
-    // For example, if cancelled in the 3rd interval, only count the first 2 intervals (30 min)
-    let duration_minutes = if is_cancelled {
-        // Exclude the last interval (the one where cancellation happened)
-        // If there are intervals, subtract 1; otherwise 0
-        if intervals.len() > 0 {
-            (intervals.len() - 1) as i32 * 15
-        } else {
-            0
-        }
-    } else {
-        workblock.duration_minutes.unwrap_or(0)
-    };
+    let total_minutes = (timeline_data.len() as i32) * 15;
 
-    let duration_worked_minutes = if is_cancelled {
-        duration_minutes
-    } else {
-        duration_minutes
-    };
-    
-    // Generate activity data (group by words) - each interval is always 15 minutes
     let mut activity_map: HashMap<String, i32> = HashMap::new();
-    for interval in &intervals {
-        if let Some(words) = &interval.words {
-            let words_lower = words.to_lowercase().trim().to_string();
-            if !words_lower.is_empty() {
-                // Each interval always represents 15 minutes, regardless of when words were recorded
-                *activity_map.entry(words_lower).or_insert(0) += 15;
+    for td in &timeline_data {
+        if let Some(words) = &td.words {
+            let key = words.to_lowercase().trim().to_string();
+            if !key.is_empty() {
+                *activity_map.entry(key).or_insert(0) += 15;
             }
         }
     }
-    
-    // Calculate percentages based on workblock duration (not sum of activity minutes)
-    // Percentage = (freq_of_activity * 15 minutes) / workblock_duration
-    let activity_data: Vec<ActivityData> = activity_map
+
+    let mut activity_data: Vec<ActivityData> = activity_map
         .into_iter()
-        .map(|(words, minutes)| {
-            let percentage = if duration_minutes > 0 {
-                (minutes as f64 / duration_minutes as f64) * 100.0
+        .map(|(words, minutes)| ActivityData {
+            percentage: if total_minutes > 0 {
+                (minutes as f64 / total_minutes as f64) * 100.0
             } else {
                 0.0
-            };
-            ActivityData {
-                words,
-                total_minutes: minutes,
-                percentage,
-            }
+            },
+            words,
+            total_minutes: minutes,
         })
         .collect();
-    
-    // Generate activity frequency (count entire phrase as one activity)
-    let mut word_freq_map: HashMap<String, i32> = HashMap::new();
-    for interval in &intervals {
-        if let Some(words) = &interval.words {
-            // Count entire phrase as one activity (not split by words)
-            let words_lower = words.to_lowercase().trim().to_string();
-            if !words_lower.is_empty() {
-                *word_freq_map.entry(words_lower).or_insert(0) += 1;
-            }
-        }
-    }
-    
-    let word_frequency: Vec<WordFrequency> = word_freq_map
-        .into_iter()
-        .map(|(word, count)| WordFrequency { word, count })
-        .collect();
-    
-    Ok(WorkblockVisualization {
-        id: workblock_id,
-        duration_minutes,
-        duration_set_minutes: Some(duration_set_minutes),
-        duration_worked_minutes: Some(duration_worked_minutes),
-        status: workblock.status.as_str().to_string(),
-        name: workblock.name,
-        notes: workblock.notes,
+
+    activity_data.sort_by(|a, b| b.total_minutes.cmp(&a.total_minutes));
+
+    Ok(DailyVisualizationData {
+        total_sessions: sessions.len() as i32,
+        total_minutes,
         timeline_data,
         activity_data,
-        word_frequency,
     })
 }
-
-/// Generate daily aggregate visualization data
-/// Builds from individual workblock visualizations
-pub fn generate_daily_aggregate(app: &AppHandle, date: &str) -> Result<DailyAggregate> {
-    let workblocks = get_workblocks_by_date(app, date)?;
-    
-    // First, generate visualization for each workblock
-    let mut workblock_visualizations: Vec<WorkblockVisualization> = Vec::new();
-    for workblock in &workblocks {
-        if let Some(id) = workblock.id {
-            if let Ok(viz) = generate_workblock_visualization(app, id) {
-                workblock_visualizations.push(viz);
-            }
-        }
-    }
-    
-    // Now aggregate data from all workblock visualizations
-    let mut all_timeline_data: Vec<AggregateTimelineData> = Vec::new();
-    let mut activity_map: HashMap<String, i32> = HashMap::new();
-    let mut word_freq_map: HashMap<String, i32> = HashMap::new();
-    let mut aggregate_total_minutes: i32 = 0;
-    
-    for workblock_viz in &workblock_visualizations {
-        // Add timeline data from this workblock
-        for timeline_item in &workblock_viz.timeline_data {
-            all_timeline_data.push(AggregateTimelineData {
-                workblock_id: workblock_viz.id,
-                interval_number: timeline_item.interval_number,
-                start_time: timeline_item.start_time.clone(),
-                end_time: timeline_item.end_time.clone(),
-                words: timeline_item.words.clone(),
-                duration_minutes: timeline_item.duration_minutes,
-                workblock_status: timeline_item.workblock_status.clone(),
-            });
-        }
-        
-        // Aggregate activity data
-        for activity in &workblock_viz.activity_data {
-            let words_lower = activity.words.to_lowercase().trim().to_string();
-            *activity_map.entry(words_lower).or_insert(0) += activity.total_minutes;
-        }
-        
-        // Aggregate word frequency
-        for word_freq in &workblock_viz.word_frequency {
-            let word_lower = word_freq.word.to_lowercase().trim().to_string();
-            *word_freq_map.entry(word_lower).or_insert(0) += word_freq.count;
-        }
-        
-        // Sum up workblock durations
-        aggregate_total_minutes += workblock_viz.duration_minutes;
-    }
-    
-    // Sort timeline chronologically
-    all_timeline_data.sort_by(|a, b| a.start_time.cmp(&b.start_time));
-    
-    // Calculate activity percentages based on aggregate total minutes (sum of all workblock durations)
-    // Percentage = (freq_of_activity_today * 15 minutes) / sum_of_durations_of_all_workblocks
-    let activity_data: Vec<ActivityData> = activity_map
-        .into_iter()
-        .map(|(words, minutes)| {
-            let percentage = if aggregate_total_minutes > 0 {
-                (minutes as f64 / aggregate_total_minutes as f64) * 100.0
-            } else {
-                0.0
-            };
-            ActivityData {
-                words,
-                total_minutes: minutes,
-                percentage,
-            }
-        })
-        .collect();
-    
-    let word_frequency: Vec<WordFrequency> = word_freq_map
-        .into_iter()
-        .map(|(word, count)| WordFrequency { word, count })
-        .collect();
-    
-    // Count workblocks and generate boundaries
-    let total_workblocks = workblocks.len() as i32;
-    let mut workblock_boundaries: Vec<WorkblockBoundary> = workblocks
-        .iter()
-        .map(|wb| WorkblockBoundary {
-            id: wb.id.unwrap(),
-            start_time: wb.start_time.clone(),
-            end_time: wb.end_time.clone(),
-            status: wb.status.as_str().to_string(),
-        })
-        .collect();
-    
-    // Sort by start_time to ensure chronological order
-    workblock_boundaries.sort_by(|a, b| a.start_time.cmp(&b.start_time));
-    
-    Ok(DailyAggregate {
-        total_workblocks,
-        total_minutes: aggregate_total_minutes,
-        timeline_data: all_timeline_data,
-        activity_data,
-        word_frequency,
-        workblock_boundaries,
-    })
-}
-
-/// Generate complete daily visualization data (workblocks + aggregate)
-pub fn generate_daily_visualization_data(
-    app: &AppHandle,
-    date: &str,
-) -> Result<DailyVisualizationData> {
-    let workblocks = get_workblocks_by_date(app, date)?;
-    
-    let mut workblock_visualizations = Vec::new();
-    for workblock in &workblocks {
-        if let Some(id) = workblock.id {
-            let viz = generate_workblock_visualization(app, id)?;
-            workblock_visualizations.push(viz);
-        }
-    }
-    
-    let daily_aggregate = generate_daily_aggregate(app, date)?;
-    
-    Ok(DailyVisualizationData {
-        workblocks: workblock_visualizations,
-        daily_aggregate,
-    })
-}
-

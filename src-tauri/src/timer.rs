@@ -1,12 +1,9 @@
-// Timer system for managing workblocks and 15-minute intervals
-
 use crate::db::{
-    add_interval, get_active_workblock, get_current_interval, get_interval_by_id,
-    get_workblock_by_id, update_interval_words, complete_workblock, IntervalStatus,
+    add_interval, get_active_session, get_current_interval, get_interval_by_id,
+    update_interval_words, IntervalStatus,
 };
-use crate::tray::{TrayIconState, TrayManager};
 use crate::window_manager::WindowManager;
-use chrono::{DateTime, Local, Utc};
+use chrono::{DateTime, Local};
 use serde::{Deserialize, Serialize};
 use std::env;
 use std::sync::Arc;
@@ -25,18 +22,13 @@ pub struct TimerConfigInfo {
 #[derive(Debug, Clone)]
 struct TimerConfig {
     dev_mode: bool,
-    /// How often an interval "completes" (wall-clock), can be accelerated in dev.
     interval_tick: Duration,
-    /// How long after showing a prompt to auto-record "Away from workspace".
     auto_away_delay: Duration,
-    /// The logical duration represented by each interval in the data model (minutes).
-    /// This should stay 15 for the current DB + visualization assumptions.
     logical_interval_minutes: i32,
 }
 
 impl TimerConfig {
     fn load() -> Self {
-        // Production defaults
         let mut cfg = Self {
             dev_mode: false,
             interval_tick: Duration::from_secs(15 * 60),
@@ -44,7 +36,6 @@ impl TimerConfig {
             logical_interval_minutes: 15,
         };
 
-        // Dev-only overrides (ignored in release builds)
         if cfg!(debug_assertions) {
             let dev_enabled = env::var("LOG15_DEV_TIMERS")
                 .ok()
@@ -72,24 +63,14 @@ impl TimerConfig {
                 cfg.logical_interval_minutes = logical_minutes;
 
                 println!(
-                    "[TIMER] Dev timers enabled: interval_tick={}s, auto_away_delay={}s, logical_interval_minutes={}",
+                    "[TIMER] Dev timers enabled: interval_tick={}s, auto_away_delay={}s",
                     cfg.interval_tick.as_secs(),
                     cfg.auto_away_delay.as_secs(),
-                    cfg.logical_interval_minutes
                 );
             }
         }
 
         cfg
-    }
-
-    fn total_intervals(&self, duration_minutes: i32) -> i32 {
-        let logical = self.logical_interval_minutes.max(1);
-        if duration_minutes <= 0 {
-            return 1;
-        }
-        // Ceiling division so we never under-count.
-        ((duration_minutes + logical - 1) / logical).max(1)
     }
 
     fn info(&self) -> TimerConfigInfo {
@@ -104,18 +85,18 @@ impl TimerConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TimerState {
-    pub workblock_id: Option<i64>,
+    pub session_id: Option<i64>,
     pub current_interval_id: Option<i64>,
     pub current_interval_number: i32,
     pub interval_start_time: Option<DateTime<Local>>,
-    pub prompt_shown_time: Option<DateTime<Local>>, // When prompt window was shown
+    pub prompt_shown_time: Option<DateTime<Local>>,
     pub is_running: bool,
 }
 
 impl Default for TimerState {
     fn default() -> Self {
         Self {
-            workblock_id: None,
+            session_id: None,
             current_interval_id: None,
             current_interval_number: 0,
             interval_start_time: None,
@@ -135,13 +116,12 @@ pub struct TimerManager {
 
 impl TimerManager {
     pub fn new(app: AppHandle) -> Self {
-        let config = TimerConfig::load();
         Self {
             state: Arc::new(Mutex::new(TimerState::default())),
             app,
             interval_handle: Arc::new(Mutex::new(None)),
             auto_away_handle: Arc::new(Mutex::new(None)),
-            config,
+            config: TimerConfig::load(),
         }
     }
 
@@ -153,447 +133,185 @@ impl TimerManager {
         self.config.logical_interval_minutes
     }
 
-    pub fn total_intervals_for_duration(&self, duration_minutes: i32) -> i32 {
-        self.config.total_intervals(duration_minutes)
-    }
-
-    /// Start a workblock timer
-    pub async fn start_workblock(&self, workblock_id: i64, duration_minutes: i32) -> Result<(), String> {
+    /// Start (or resume) a session. Reuses an existing pending interval if present,
+    /// otherwise creates interval 1.
+    pub async fn start_session(&self, session_id: i64) -> Result<(), String> {
         let mut state = self.state.lock().await;
-        
+
         if state.is_running {
-            return Err("A workblock is already running".to_string());
+            return Err("A session is already running".to_string());
         }
 
-        // Calculate number of intervals
-        // Interval counting is based on the logical interval minutes (typically 15).
-        let total_intervals = self.config.total_intervals(duration_minutes);
-        
-        // Initialize state
-        state.workblock_id = Some(workblock_id);
-        state.current_interval_number = 0;
+        // Reuse an existing pending interval (app-restart resume) or create a fresh one
+        let (current_interval_id, current_interval_number) =
+            match get_current_interval(&self.app, session_id) {
+                Ok(Some(existing)) => (existing.id, existing.interval_number),
+                _ => {
+                    let first = add_interval(&self.app, session_id, 1)
+                        .map_err(|e| format!("Failed to create interval: {}", e))?;
+                    (first.id, 1)
+                }
+            };
+
+        state.session_id = Some(session_id);
+        state.current_interval_id = current_interval_id;
+        state.current_interval_number = current_interval_number;
+        state.interval_start_time = Some(Local::now());
         state.is_running = true;
-        
-        // Create first interval and set its start time
-        match add_interval(&self.app, workblock_id, 1) {
-            Ok(interval) => {
-                state.current_interval_id = interval.id;
-                state.current_interval_number = 1;
-                state.interval_start_time = Some(Local::now()); // Set start time when interval is created
-            }
-            Err(e) => {
-                state.is_running = false;
-                return Err(format!("Failed to create interval: {}", e));
-            }
-        }
+        drop(state);
 
-        // Start the interval timer
         let state_clone = Arc::clone(&self.state);
         let app_clone = self.app.clone();
         let config = self.config.clone();
-        
+        let start_interval_num = current_interval_number;
+
         let handle = tokio::spawn(async move {
-            // Each interval completes on the configured tick (can be accelerated in dev mode).
             let mut interval_timer = interval(config.interval_tick);
             interval_timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            interval_timer.tick().await; // consume immediate first tick
 
-            // Consume the immediate first tick to establish the baseline "now"
-            // After this, each tick represents a full interval duration passing
-            interval_timer.tick().await;
+            let mut current_num = start_interval_num;
 
-            // Start with interval 1 (the first interval that was already created)
-            let mut current_interval_num = 1;
-            let total_intervals = total_intervals;
-            
             loop {
-                // Wait for the current interval to complete (full duration)
                 interval_timer.tick().await;
-                
-                // Check if timer should still be running
+
                 let state = state_clone.lock().await;
-                if !state.is_running || state.workblock_id.is_none() {
+                if !state.is_running || state.session_id.is_none() {
                     break;
                 }
-                let workblock_id = state.workblock_id.unwrap();
-                drop(state);
-                
-                // Emit interval-complete event with interval info
-                // Use the current interval number BEFORE incrementing
-                let state = state_clone.lock().await;
+                let session_id = state.session_id.unwrap();
                 let interval_id = state.current_interval_id;
-                let interval_number = state.current_interval_number; // Use state's interval number
+                let interval_number = state.current_interval_number;
                 let prompt_time = Local::now();
                 drop(state);
-                
+
                 if let Some(interval_id) = interval_id {
-                    println!("[TIMER] Emitting interval-complete: interval_id={}, interval_number={}", interval_id, interval_number);
                     let _ = app_clone.emit("interval-complete", serde_json::json!({
-                        "workblock_id": workblock_id,
+                        "session_id": session_id,
                         "interval_id": interval_id,
                         "interval_number": interval_number
                     }));
-                    
-                    // Update prompt shown time
+
                     let mut state = state_clone.lock().await;
                     state.prompt_shown_time = Some(prompt_time);
                     drop(state);
-                    
-                    // Start auto-away timer from backend (authoritative interval lifecycle).
-                    // This avoids relying on frontend timing/order to arm auto-away.
-                    if let Some(timer_mgr_state) = app_clone.try_state::<Arc<Mutex<TimerManager>>>() {
-                        let timer_mgr = timer_mgr_state.lock().await;
-                        let _ = timer_mgr.start_auto_away_timer(interval_id).await;
-                    }
 
-                    // Emit event to show prompt window (frontend listens and shows overlay).
+                    if let Some(timer_mgr) = app_clone.try_state::<Arc<Mutex<TimerManager>>>() {
+                        let timer = timer_mgr.lock().await;
+                        let _ = timer.start_auto_away_timer(interval_id).await;
+                    }
                 }
-                
-                // Check if we've reached the total number of intervals
-                // Increment for next interval
-                current_interval_num += 1;
-                if current_interval_num > total_intervals {
-                    // We've completed the final interval tick.
-                    // IMPORTANT: Do NOT mark the workblock completed here.
-                    // The workblock should only complete after the final interval gets recorded
-                    // (either user submission or auto-away).
-                    println!(
-                        "[TIMER] Final interval tick complete (interval_number={}); awaiting final prompt submission/auto-away",
-                        interval_number
-                    );
-                    break;
-                }
-                
-                // Create next interval (for the next cycle)
+
+                // Create next interval before sleeping again
+                current_num += 1;
                 let mut state = state_clone.lock().await;
-                if let Ok(new_interval) = add_interval(&app_clone, workblock_id, current_interval_num) {
+                if !state.is_running { break; }
+                if let Ok(new_interval) = add_interval(&app_clone, session_id, current_num) {
                     state.current_interval_id = new_interval.id;
-                    state.current_interval_number = current_interval_num; // Update state with new interval number
+                    state.current_interval_number = current_num;
                     state.interval_start_time = Some(Local::now());
-                    // Don't set prompt_shown_time here - it will be set when the prompt actually appears
-                    println!("[TIMER] Created next interval: interval_number={}", current_interval_num);
                 }
                 drop(state);
             }
         });
-        
+
         *self.interval_handle.lock().await = Some(handle);
-        
         Ok(())
     }
 
-    /// Complete the current workblock (when it naturally finishes)
-    pub async fn complete_workblock(&self, workblock_id: i64) -> Result<(), String> {
+    /// Stop the in-memory timer state and cancel background tasks.
+    /// DB cleanup (pending interval deletion, session status) is handled by the command layer.
+    pub async fn stop_session(&self) -> Result<(), String> {
         let mut state = self.state.lock().await;
-        
-        if state.workblock_id != Some(workblock_id) {
-            return Err("Workblock ID mismatch".to_string());
-        }
-        
-        state.is_running = false;
+        *state = TimerState::default();
         drop(state);
-        
-        // Cancel interval timer
+
         if let Some(handle) = self.interval_handle.lock().await.take() {
             handle.abort();
         }
-        
-        // Cancel auto-away timer
         if let Some(handle) = self.auto_away_handle.lock().await.take() {
             handle.abort();
         }
-        
-        // Complete the workblock
-        complete_workblock(&self.app, workblock_id)
-            .map_err(|e| format!("Failed to complete workblock: {}", e))?;
-        
-        // Emit workblock-complete event
-        let _ = self.app.emit("workblock-complete", workblock_id);
-        
-        // Reset state
-        let mut state = self.state.lock().await;
-        *state = TimerState::default();
-        
+
         Ok(())
     }
 
-    /// Cancel the current workblock (when user clicks cancel)
-    pub async fn cancel_workblock(&self, workblock_id: i64) -> Result<(), String> {
-        let mut state = self.state.lock().await;
-        
-        // Check if workblock ID matches, but don't fail if it doesn't - just log it
-        // This allows cancelling even if timer state is out of sync
-        if state.workblock_id != Some(workblock_id) {
-            println!("[TIMER] Warning: Workblock ID mismatch in timer state. Timer state has {:?}, cancelling workblock_id={}. Proceeding anyway.", state.workblock_id, workblock_id);
-        }
-        
-        state.is_running = false;
-        drop(state);
-        
-        // Cancel interval timer
-        let interval_handle_opt = self.interval_handle.lock().await.take();
-        if let Some(handle) = interval_handle_opt {
-            handle.abort();
-            println!("[TIMER] Interval timer aborted");
-        }
-        
-        // Cancel auto-away timer
-        let auto_away_handle_opt = self.auto_away_handle.lock().await.take();
-        if let Some(handle) = auto_away_handle_opt {
-            handle.abort();
-            println!("[TIMER] Auto-away timer aborted");
-        }
-        
-        // Cancel the workblock (sets status to cancelled)
-        crate::db::cancel_workblock(&self.app, workblock_id)
-            .map_err(|e| {
-                eprintln!("[TIMER] Error cancelling workblock in database: {}", e);
-                format!("Failed to cancel workblock: {}", e)
-            })?;
-        
-        // Emit workblock-complete event (frontend can check status to see if cancelled)
-        let _ = self.app.emit("workblock-complete", workblock_id);
-        
-        // Reset state
-        let mut state = self.state.lock().await;
-        *state = TimerState::default();
-        
-        Ok(())
-    }
-
-    /// Start the auto-away timer (10 minutes after prompt is shown)
+    /// Start the auto-away timer (fires if the user doesn't respond to a prompt).
     pub async fn start_auto_away_timer(&self, interval_id: i64) -> Result<(), String> {
-        // Cancel any existing auto-away timer
         if let Some(handle) = self.auto_away_handle.lock().await.take() {
             handle.abort();
         }
-        
+
         let app_clone = self.app.clone();
         let state_clone = Arc::clone(&self.state);
-        let interval_handle_clone = Arc::clone(&self.interval_handle);
         let config = self.config.clone();
-        
+
         let handle = tokio::spawn(async move {
-            // #region agent log
-            use std::fs::OpenOptions;
-            use std::io::Write;
-            if let Ok(mut file) = OpenOptions::new().create(true).append(true).open("/Users/ronaldlin/log15/.cursor/debug.log") {
-                let _ = writeln!(file, r#"{{"location":"timer.rs:264","message":"Auto-away timer started","data":{{"interval_id":{},"timestamp":{}}},"timestamp":{},"sessionId":"debug-session","runId":"run1","hypothesisId":"A"}}"#, interval_id, chrono::Utc::now().timestamp_millis(), chrono::Utc::now().timestamp_millis());
-            }
-            // #endregion
-            // Auto-away timer: configurable (accelerated in dev mode)
             tokio::time::sleep(config.auto_away_delay).await;
-            
-            // #region agent log
-            if let Ok(mut file) = OpenOptions::new().create(true).append(true).open("/Users/ronaldlin/log15/.cursor/debug.log") {
-                let _ = writeln!(file, r#"{{"location":"timer.rs:270","message":"Auto-away timer expired","data":{{"interval_id":{},"timestamp":{}}},"timestamp":{},"sessionId":"debug-session","runId":"run1","hypothesisId":"A"}}"#, interval_id, chrono::Utc::now().timestamp_millis(), chrono::Utc::now().timestamp_millis());
-            }
-            // #endregion
-            
-            // Check if the specific interval still has no recorded words
+
             if let Ok(interval) = get_interval_by_id(&app_clone, interval_id) {
-                // #region agent log
-                if let Ok(mut file) = OpenOptions::new().create(true).append(true).open("/Users/ronaldlin/log15/.cursor/debug.log") {
-                    let _ = writeln!(file, r#"{{"location":"timer.rs:275","message":"Interval retrieved","data":{{"interval_id":{},"interval_number":{},"workblock_id":{},"has_words":{},"timestamp":{}}},"timestamp":{},"sessionId":"debug-session","runId":"run1","hypothesisId":"A"}}"#, interval_id, interval.interval_number, interval.workblock_id, interval.words.is_some(), chrono::Utc::now().timestamp_millis(), chrono::Utc::now().timestamp_millis());
-                }
-                // #endregion
                 if interval.words.is_none() {
-                    // Auto-away: record "Away from workspace"
                     let _ = update_interval_words(
                         &app_clone,
                         interval_id,
                         "Away from workspace".to_string(),
                         IntervalStatus::AutoAway,
                     );
-                    
-                    println!("[TIMER] Auto-away: Recording 'Away from workspace' for interval {}", interval_id);
-                    
-                    // Check if this is the last interval BEFORE deciding what to do with the window
-                    let is_last_interval = if let Ok(workblock) = get_workblock_by_id(&app_clone, interval.workblock_id) {
-                        let total_intervals = config.total_intervals(workblock.duration_minutes.unwrap_or(60));
-                        let result = interval.interval_number >= total_intervals;
-                        // #region agent log
-                        if let Ok(mut file) = OpenOptions::new().create(true).append(true).open("/Users/ronaldlin/log15/.cursor/debug.log") {
-                            let _ = writeln!(file, r#"{{"location":"timer.rs:287","message":"Last interval check","data":{{"interval_number":{},"total_intervals":{},"is_last_interval":{},"workblock_id":{},"timestamp":{}}},"timestamp":{},"sessionId":"debug-session","runId":"run1","hypothesisId":"B"}}"#, interval.interval_number, total_intervals, result, interval.workblock_id, chrono::Utc::now().timestamp_millis(), chrono::Utc::now().timestamp_millis());
-                        }
-                        // #endregion
-                        result
-                    } else {
-                        // #region agent log
-                        if let Ok(mut file) = OpenOptions::new().create(true).append(true).open("/Users/ronaldlin/log15/.cursor/debug.log") {
-                            let _ = writeln!(file, r#"{{"location":"timer.rs:290","message":"Failed to get workblock","data":{{"workblock_id":{},"timestamp":{}}},"timestamp":{},"sessionId":"debug-session","runId":"run1","hypothesisId":"B"}}"#, interval.workblock_id, chrono::Utc::now().timestamp_millis(), chrono::Utc::now().timestamp_millis());
-                        }
-                        // #endregion
-                        false
-                    };
 
-                    if is_last_interval {
-                        println!(
-                            "[TIMER] Auto-away on final interval; completing workblock and showing summary ready for workblock_id={}",
-                            interval.workblock_id
-                        );
+                    println!("[TIMER] Auto-away recorded for interval {}", interval_id);
 
-                        // #region agent log
-                        if let Ok(mut file) = OpenOptions::new().create(true).append(true).open("/Users/ronaldlin/log15/.cursor/debug.log") {
-                            let _ = writeln!(file, r#"{{"location":"timer.rs:297","message":"Entering last interval branch","data":{{"workblock_id":{},"timestamp":{}}},"timestamp":{},"sessionId":"debug-session","runId":"run1","hypothesisId":"C"}}"#, interval.workblock_id, chrono::Utc::now().timestamp_millis(), chrono::Utc::now().timestamp_millis());
-                        }
-                        // #endregion
+                    let state = state_clone.lock().await;
+                    let still_running = state.is_running;
+                    drop(state);
 
-                        // 1. Complete the workblock in DB first so main window and summary see "completed"
-                        let _ = complete_workblock(&app_clone, interval.workblock_id);
-                        let _ = app_clone.emit("workblock-complete", interval.workblock_id);
-
-                        // 2. Reset timer state so main window's get_active_workblock_cmd returns null and UI shows "Start New Workblock"
-                        let mut state = state_clone.lock().await;
-                        *state = TimerState::default();
-                        drop(state);
-
-                        if let Some(h) = interval_handle_clone.lock().await.take() {
-                            h.abort();
-                        }
-
-                        // 3. Show summary-ready overlay and update tray
-                        if let Some(window_mgr_state) = app_clone.try_state::<Arc<tauri::async_runtime::Mutex<WindowManager>>>() {
-                            // #region agent log
-                            if let Ok(mut file) = OpenOptions::new().create(true).append(true).open("/Users/ronaldlin/log15/.cursor/debug.log") {
-                                let _ = writeln!(file, r#"{{"location":"timer.rs:303","message":"Window manager state found","data":{{"timestamp":{}}},"timestamp":{},"sessionId":"debug-session","runId":"run1","hypothesisId":"C"}}"#, chrono::Utc::now().timestamp_millis(), chrono::Utc::now().timestamp_millis());
-                            }
-                            // #endregion
-                            let window_mgr = window_mgr_state.lock().await;
-                            let result = window_mgr.show_summary_ready().await;
-                            // #region agent log
-                            if let Ok(mut file) = OpenOptions::new().create(true).append(true).open("/Users/ronaldlin/log15/.cursor/debug.log") {
-                                let _ = writeln!(file, r#"{{"location":"timer.rs:307","message":"show_summary_ready result","data":{{"success":{},"error":"{}","timestamp":{}}},"timestamp":{},"sessionId":"debug-session","runId":"run1","hypothesisId":"C"}}"#, result.is_ok(), result.as_ref().err().map(|e| e.to_string()).unwrap_or_default(), chrono::Utc::now().timestamp_millis(), chrono::Utc::now().timestamp_millis());
-                            }
-                            // #endregion
-                            println!("[TIMER] Auto-away: Called show_summary_ready");
-                        } else {
-                            // #region agent log
-                            if let Ok(mut file) = OpenOptions::new().create(true).append(true).open("/Users/ronaldlin/log15/.cursor/debug.log") {
-                                let _ = writeln!(file, r#"{{"location":"timer.rs:312","message":"Window manager state NOT found","data":{{"timestamp":{}}},"timestamp":{},"sessionId":"debug-session","runId":"run1","hypothesisId":"C"}}"#, chrono::Utc::now().timestamp_millis(), chrono::Utc::now().timestamp_millis());
-                            }
-                            // #endregion
-                        }
-
-                        if let Some(tray_mgr_state) = app_clone.try_state::<Arc<Mutex<TrayManager>>>() {
-                            let mut tray = tray_mgr_state.lock().await;
-                            tray.update_icon_state(TrayIconState::SummaryReady).await;
-                        }
-                    } else {
-                        // #region agent log
-                        if let Ok(mut file) = OpenOptions::new().create(true).append(true).open("/Users/ronaldlin/log15/.cursor/debug.log") {
-                            let _ = writeln!(file, r#"{{"location":"timer.rs:336","message":"Not last interval - closing window","data":{{"timestamp":{}}},"timestamp":{},"sessionId":"debug-session","runId":"run1","hypothesisId":"D"}}"#, chrono::Utc::now().timestamp_millis(), chrono::Utc::now().timestamp_millis());
-                        }
-                        // #endregion
-                        // Not the last interval - close the window as usual
-                        // Emit auto-away event (PromptWindow listens for this)
+                    if still_running {
                         let _ = app_clone.emit("auto-away", interval_id);
-                        
-                        // Also emit prompt-hide to ensure window closes
                         let _ = app_clone.emit("prompt-hide", ());
-                        
-                        // Call hide command directly to ensure window closes
-                        // Note: We use try_state which returns Option, and Tauri uses async_runtime::Mutex
-                        if let Some(window_mgr_state) = app_clone.try_state::<Arc<tauri::async_runtime::Mutex<WindowManager>>>() {
-                            let window_mgr = window_mgr_state.lock().await;
-                            let _ = window_mgr.hide_prompt_window().await;
-                            println!("[TIMER] Auto-away: Called hide_prompt_window");
+
+                        if let Some(wm) = app_clone.try_state::<Arc<tauri::async_runtime::Mutex<WindowManager>>>() {
+                            let wm = wm.lock().await;
+                            let _ = wm.hide_prompt_window().await;
                         }
                     }
-                } else {
-                    // #region agent log
-                    if let Ok(mut file) = OpenOptions::new().create(true).append(true).open("/Users/ronaldlin/log15/.cursor/debug.log") {
-                        let _ = writeln!(file, r#"{{"location":"timer.rs:352","message":"Interval already has words - skipping auto-away","data":{{"interval_id":{},"timestamp":{}}},"timestamp":{},"sessionId":"debug-session","runId":"run1","hypothesisId":"A"}}"#, interval_id, chrono::Utc::now().timestamp_millis(), chrono::Utc::now().timestamp_millis());
-                    }
-                    // #endregion
                 }
-            } else {
-                // #region agent log
-                if let Ok(mut file) = OpenOptions::new().create(true).append(true).open("/Users/ronaldlin/log15/.cursor/debug.log") {
-                    let _ = writeln!(file, r#"{{"location":"timer.rs:358","message":"Failed to get interval by ID","data":{{"interval_id":{},"timestamp":{}}},"timestamp":{},"sessionId":"debug-session","runId":"run1","hypothesisId":"A"}}"#, interval_id, chrono::Utc::now().timestamp_millis(), chrono::Utc::now().timestamp_millis());
-                }
-                // #endregion
             }
         });
-        
+
         *self.auto_away_handle.lock().await = Some(handle);
-        
         Ok(())
     }
 
-    /// Cancel the auto-away timer (when user submits words)
     pub async fn cancel_auto_away_timer(&self) {
         if let Some(handle) = self.auto_away_handle.lock().await.take() {
             handle.abort();
         }
     }
 
-    /// Get current timer state
     pub async fn get_state(&self) -> TimerState {
         self.state.lock().await.clone()
     }
 
-    /// Get time remaining in current interval (in seconds)
     pub async fn get_interval_time_remaining(&self) -> Option<i64> {
         let state = self.state.lock().await;
-        
         if let Some(start_time) = state.interval_start_time {
             let elapsed = (Local::now() - start_time).num_seconds();
             let interval_secs = self.config.interval_tick.as_secs() as i64;
-            let remaining = interval_secs - elapsed;
-            Some(remaining.max(0))
+            Some((interval_secs - elapsed).max(0))
         } else {
             None
         }
     }
 
-    /// Check if there's an active workblock and restore timer if needed
-    pub async fn restore_active_workblock(&self) -> Result<(), String> {
-        // Check database for active workblock
-        match get_active_workblock(&self.app) {
-            Ok(Some(workblock)) => {
-                let workblock_id = workblock.id.unwrap();
-                let duration = workblock.duration_minutes.unwrap_or(60);
-                
-                // Get current interval
-                if let Ok(Some(current_interval)) = get_current_interval(&self.app, workblock_id) {
-                    let mut state = self.state.lock().await;
-                    state.workblock_id = Some(workblock_id);
-                    state.current_interval_id = current_interval.id;
-                    state.current_interval_number = current_interval.interval_number;
-                    state.interval_start_time = Some(
-                        DateTime::parse_from_rfc3339(&current_interval.start_time)
-                            .unwrap()
-                            .with_timezone(&Local),
-                    );
-                    state.is_running = true;
-                    drop(state);
-                    
-                    // Calculate remaining intervals
-                    let elapsed_intervals = current_interval.interval_number;
-                    let total_intervals = self.config.total_intervals(duration);
-                    let remaining_intervals = total_intervals - elapsed_intervals;
-                    
-                    if remaining_intervals > 0 {
-                        // Restart timer for remaining intervals
-                        // Note: This is a simplified version - in production, you'd want to
-                        // calculate the exact time remaining in the current interval
-                        self.start_workblock(workblock_id, duration).await?;
-                    }
-                } else {
-                    // No current interval, start fresh
-                    self.start_workblock(workblock_id, duration).await?;
-                }
+    /// Called on app startup: resumes an active session if one exists in the DB.
+    pub async fn restore_active_session(&self) -> Result<(), String> {
+        match get_active_session(&self.app) {
+            Ok(Some(session)) => {
+                let session_id = session.id.unwrap();
+                self.start_session(session_id).await?;
             }
-            Ok(None) => {
-                // No active workblock, reset state
-                let mut state = self.state.lock().await;
-                *state = TimerState::default();
-            }
-            Err(e) => {
-                return Err(format!("Failed to get active workblock: {}", e));
-            }
+            Ok(None) => {}
+            Err(e) => return Err(format!("Failed to get active session: {}", e)),
         }
-        
         Ok(())
     }
 }

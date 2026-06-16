@@ -1,6 +1,6 @@
 // System tray integration for Log15
 
-use crate::db::{get_active_workblock, get_today_date, get_workblocks_by_date};
+use crate::db::{get_active_session, get_today_date};
 use tauri::{
     AppHandle, Manager, tray::{TrayIconBuilder, TrayIconEvent},
     menu::{Menu, MenuItem},
@@ -8,9 +8,9 @@ use tauri::{
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum TrayIconState {
-    Idle,          // No active workblock
-    Active,        // Workblock in progress
-    SummaryReady,  // Workblock completed, summary available
+    Idle,          // No active session
+    Active,        // Session in progress
+    SummaryReady,  // Session completed, summary available
 }
 
 pub struct TrayManager {
@@ -29,7 +29,7 @@ impl TrayManager {
     /// Create and setup the system tray
     pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         // Create menu items
-        let start_workblock = MenuItem::with_id(app, "start_workblock", "Start Workblock", true, None::<&str>)?;
+        let start_session = MenuItem::with_id(app, "start_session", "Start Session", true, None::<&str>)?;
         let view_summary = MenuItem::with_id(app, "view_summary", "View Summary", false, None::<&str>)?;
         let view_last_words = MenuItem::with_id(app, "view_last_words", "View Last Words", false, None::<&str>)?;
         let show_window = MenuItem::with_id(app, "show_window", "Show Window", true, None::<&str>)?;
@@ -38,7 +38,7 @@ impl TrayManager {
 
         // Create menu
         let menu = Menu::with_items(app, &[
-            &start_workblock,
+            &start_session,
             &view_summary,
             &view_last_words,
             &show_window,
@@ -51,7 +51,7 @@ impl TrayManager {
         // For MVP, we'll use default icon (can be enhanced later with custom icons for different states)
         let _tray_icon = TrayIconBuilder::new()
             .menu(&menu)
-            .tooltip("Log15 - Workblock Tracker")
+            .tooltip("Log15")
             .build(app)?;
 
         Ok(())
@@ -67,8 +67,8 @@ impl TrayManager {
 
         // Update tooltip based on state
         let _tooltip = match state {
-            TrayIconState::Idle => "Log15 - No active workblock",
-            TrayIconState::Active => "Log15 - Workblock in progress",
+            TrayIconState::Idle => "Log15",
+            TrayIconState::Active => "Log15 - Session in progress",
             TrayIconState::SummaryReady => "Log15 - Summary ready",
         };
 
@@ -79,19 +79,9 @@ impl TrayManager {
 
     /// Update tray menu based on current state
     pub async fn update_menu(&self) {
-        let _has_active_workblock = get_active_workblock(&self.app).is_ok_and(|opt| opt.is_some());
-        
-        // Check if there are completed or cancelled workblocks today (summary available)
-        let today = get_today_date();
-        let _has_summary = get_workblocks_by_date(&self.app, &today)
-            .map(|wbs| wbs.iter().any(|wb| {
-                let status = wb.status.as_str();
-                status == "completed" || status == "cancelled"
-            }))
-            .unwrap_or(false);
-
-        // Note: Menu item visibility updates would require recreating the menu
-        // For MVP, we'll handle this in the event handler by checking state
+        let _today = get_today_date();
+        // Menu item visibility updates would require recreating the menu;
+        // state is managed via update_icon_state calls from the command layer.
     }
 
     /// Handle tray events (click events)
@@ -124,11 +114,7 @@ impl TrayManager {
 
     /// Update tray state based on workblock status
     pub async fn refresh_state(&mut self) {
-        // Check if summary window is open first (highest priority)
-        // We'll check this via a command instead of direct state access
-        // The window manager will update tray state when summary opens/closes
-        
-        let has_active = get_active_workblock(&self.app).is_ok_and(|opt| opt.is_some());
+        let has_active = get_active_session(&self.app).is_ok_and(|opt| opt.is_some());
 
         let new_state = if has_active {
             TrayIconState::Active

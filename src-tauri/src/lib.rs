@@ -6,12 +6,10 @@ pub mod window_manager;
 pub use tray::TrayManager;
 
 use db::{
-    init_db, create_workblock, get_active_workblock, cancel_workblock, get_workblock_by_id,
-    get_workblocks_by_date, update_workblock_name_notes,
-    add_interval, update_interval_words, get_intervals_by_workblock, get_current_interval,
-    check_and_reset_daily, archive_all_unarchived_dates, get_archived_day, get_all_archived_dates, get_today_date,
-    generate_workblock_visualization, generate_daily_aggregate, generate_daily_visualization_data,
-    delete_day,
+    init_db, create_session, get_active_session, stop_session,
+    add_interval, update_interval_words, get_intervals_by_session, get_current_interval,
+    check_and_reset_daily, archive_all_unarchived_dates, get_archived_day,
+    get_all_archived_dates, get_today_date, generate_daily_visualization_data, delete_day,
 };
 use timer::TimerManager;
 use window_manager::WindowManager;
@@ -20,17 +18,11 @@ use tokio::sync::Mutex;
 use tauri::{Manager, Emitter, async_runtime};
 use timer::TimerConfigInfo;
 
-// Re-export types for frontend
-pub use db::{Workblock, Interval, DailyArchive, WorkblockStatus, IntervalStatus};
+pub use db::{Session, Interval, DailyArchive, SessionStatus, IntervalStatus};
 
 // ============================================================================
 // Tauri Commands
 // ============================================================================
-
-#[tauri::command]
-fn greet(name: &str) -> String {
-    format!("Hello, {}! You've been greeted from Rust!", name)
-}
 
 #[tauri::command]
 fn init_database(app: tauri::AppHandle) -> Result<(), String> {
@@ -38,93 +30,76 @@ fn init_database(app: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-// Workblock commands
+// Session commands
+
 #[tauri::command]
-async fn start_workblock(
-    app: tauri::AppHandle,
-    duration_minutes: i32,
-) -> Result<Workblock, String> {
-    // Check and reset daily if needed
+async fn start_session_cmd(app: tauri::AppHandle) -> Result<Session, String> {
     check_and_reset_daily(&app).map_err(|e| e.to_string())?;
-    
-    // Check if there's already an active workblock
-    if let Ok(Some(active)) = get_active_workblock(&app) {
-        return Err(format!("Workblock {} is already active", active.id.unwrap()));
+
+    if let Ok(Some(active)) = get_active_session(&app) {
+        return Err(format!("Session {} is already active", active.id.unwrap()));
     }
-    
-    // Create workblock
-    let workblock = create_workblock(&app, duration_minutes).map_err(|e| e.to_string())?;
-    let workblock_id = workblock.id.unwrap();
-    
-    // Get timer manager from app state
+
+    let session = create_session(&app).map_err(|e| e.to_string())?;
+    let session_id = session.id.unwrap();
+
     let timer_manager = app.state::<Arc<Mutex<TimerManager>>>();
     let timer = timer_manager.lock().await;
-    
-    // Start the timer
-    timer.start_workblock(workblock_id, duration_minutes).await?;
-    
-    Ok(workblock)
+    timer.start_session(session_id).await?;
+
+    Ok(session)
 }
 
 #[tauri::command]
-async fn cancel_workblock_cmd(app: tauri::AppHandle, workblock_id: i64) -> Result<Workblock, String> {
-    // Verify workblock exists and is active
-    let workblock = get_active_workblock(&app)
-        .map_err(|e| format!("Failed to get active workblock: {}", e))?
-        .ok_or_else(|| "No active workblock found".to_string())?;
-    
-    if workblock.id != Some(workblock_id) {
-        return Err(format!("Workblock ID mismatch: expected {}, got {:?}", workblock_id, workblock.id));
+async fn stop_session_cmd(app: tauri::AppHandle, session_id: i64) -> Result<Session, String> {
+    // Verify there is an active session matching this ID
+    let active = get_active_session(&app)
+        .map_err(|e| format!("Failed to get active session: {}", e))?
+        .ok_or_else(|| "No active session found".to_string())?;
+
+    if active.id != Some(session_id) {
+        return Err(format!(
+            "Session ID mismatch: expected {}, got {:?}",
+            session_id, active.id
+        ));
     }
-    
-    // Get the current interval before cancelling (to remember which interval was active)
-    // This is optional - if there's no current interval, that's fine
-    let _current_interval = get_current_interval(&app, workblock_id).ok().flatten();
-    
-    // Hide prompt window if it's open
+
+    // Hide prompt window if open
     let window_manager = app.state::<Arc<Mutex<WindowManager>>>();
     let window_mgr = window_manager.lock().await;
     window_mgr.hide_prompt_window().await.ok();
     drop(window_mgr);
-    
-    // Get timer manager and cancel the timer
+
+    // Stop the timer
     let timer_manager = app.state::<Arc<Mutex<TimerManager>>>();
     let timer = timer_manager.lock().await;
-    
-    // Cancel the timer (this will also cancel the workblock)
-    timer.cancel_workblock(workblock_id).await.map_err(|e| {
-        eprintln!("[CANCEL] Error from timer.cancel_workblock: {}", e);
-        e
-    })?;
+    timer.cancel_auto_away_timer().await;
+    timer.stop_session().await?;
     drop(timer);
-    
-    // Get the cancelled workblock
-    let cancelled = get_workblock_by_id(&app, workblock_id)
-        .map_err(|e| format!("Failed to get cancelled workblock: {}", e))?;
-    
-    Ok(cancelled)
+
+    // Finalize in DB (deletes pending intervals, sets end_time + status)
+    let stopped = stop_session(&app, session_id).map_err(|e| e.to_string())?;
+
+    let _ = app.emit("session-stopped", session_id);
+
+    // Update tray state to Idle
+    let tray_manager = app.state::<Arc<Mutex<TrayManager>>>();
+    let mut tray = tray_manager.lock().await;
+    tray.update_icon_state(crate::tray::TrayIconState::Idle).await;
+
+    Ok(stopped)
 }
 
 #[tauri::command]
-fn get_active_workblock_cmd(app: tauri::AppHandle) -> Result<Option<Workblock>, String> {
-    get_active_workblock(&app).map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-fn get_workblocks_by_date_cmd(app: tauri::AppHandle, date: String) -> Result<Vec<Workblock>, String> {
-    get_workblocks_by_date(&app, &date).map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-fn get_today_workblocks(app: tauri::AppHandle) -> Result<Vec<Workblock>, String> {
-    let today = get_today_date();
-    get_workblocks_by_date(&app, &today).map_err(|e| e.to_string())
+fn get_active_session_cmd(app: tauri::AppHandle) -> Result<Option<Session>, String> {
+    get_active_session(&app).map_err(|e| e.to_string())
 }
 
 // Interval commands
+
 #[tauri::command]
-fn create_interval(app: tauri::AppHandle, workblock_id: i64, interval_number: i32) -> Result<Interval, String> {
-    add_interval(&app, workblock_id, interval_number).map_err(|e| e.to_string())
+fn create_interval(app: tauri::AppHandle, session_id: i64, interval_number: i32) -> Result<Interval, String> {
+    add_interval(&app, session_id, interval_number).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -133,133 +108,25 @@ async fn submit_interval_words(
     interval_id: i64,
     words: String,
 ) -> Result<serde_json::Value, String> {
-    // Cancel auto-away timer since user submitted words
+    // Cancel auto-away since user submitted words
     let timer_manager = app.state::<Arc<Mutex<TimerManager>>>();
     let timer = timer_manager.lock().await;
     timer.cancel_auto_away_timer().await;
     drop(timer);
-    
-    // Update interval with words
+
     let interval = update_interval_words(&app, interval_id, words, IntervalStatus::Recorded)
         .map_err(|e| e.to_string())?;
-    
-    // Check if this is the last interval
-    let workblock_id = interval.workblock_id;
-    let workblock = get_workblock_by_id(&app, workblock_id)
-        .map_err(|e| e.to_string())?;
-    
-    // Calculate based on TimerManager config (keeps dev-timers + real mode consistent)
-    let timer_manager = app.state::<Arc<Mutex<TimerManager>>>();
-    let timer = timer_manager.lock().await;
-    let total_intervals = timer.total_intervals_for_duration(workblock.duration_minutes.unwrap_or(60));
-    drop(timer);
 
-    let is_last_interval = interval.interval_number >= total_intervals;
-    
-    if is_last_interval {
-        // For last interval, close the window and open summary-ready window
-        // Wait for checkmark animation (2 seconds) before showing summary
-        let app_clone = app.clone();
-        
-        async_runtime::spawn(async move {
-            // Wait for checkmark animation to complete (2 seconds)
-            tokio::time::sleep(tokio::time::Duration::from_millis(2000)).await;
-            
-            // Finalize the workblock
-            let timer_manager = app_clone.state::<Arc<Mutex<TimerManager>>>();
-            let timer = timer_manager.lock().await;
-            let _ = timer.complete_workblock(workblock_id).await;
-            drop(timer);
+    // Close prompt window after checkmark animation
+    let app_clone = app.clone();
+    async_runtime::spawn(async move {
+        tokio::time::sleep(tokio::time::Duration::from_millis(2000)).await;
+        let window_manager = app_clone.state::<Arc<Mutex<WindowManager>>>();
+        let wm = window_manager.lock().await;
+        let _ = wm.hide_prompt_window().await;
+    });
 
-            // Close prompt window and open summary-ready window
-            let window_manager = app_clone.state::<Arc<Mutex<WindowManager>>>();
-            let window_mgr = window_manager.lock().await;
-            let _ = window_mgr.show_summary_ready().await;
-            drop(window_mgr);
-            
-            // Update tray state to SummaryReady
-            let tray_manager = app_clone.state::<Arc<Mutex<TrayManager>>>();
-            let mut tray = tray_manager.lock().await;
-            tray.update_icon_state(crate::tray::TrayIconState::SummaryReady).await;
-            drop(tray);
-        });
-    } else {
-        // #region agent log
-        use std::fs::OpenOptions;
-        use std::io::Write;
-        if let Ok(mut file) = OpenOptions::new().create(true).append(true).open("/Users/ronaldlin/log15/.cursor/debug.log") {
-            let _ = writeln!(file, r#"{{"location":"lib.rs:175","message":"NOT calling hide_prompt_window - letting frontend handle timing","data":{{"is_last_interval":false,"timestamp":{}}},"timestamp":{},"sessionId":"debug-session","runId":"post-fix","hypothesisId":"A"}}"#, chrono::Utc::now().timestamp_millis(), chrono::Utc::now().timestamp_millis());
-        }
-        // #endregion
-        // Don't hide window here - let frontend handle closing after checkmark animation completes
-        // Frontend will call hide_prompt_window_cmd after the 2-second checkmark display
-    }
-    
-    Ok(serde_json::json!({
-        "interval": interval,
-        "is_last_interval": is_last_interval
-    }))
-}
-
-#[tauri::command]
-async fn get_timer_config_cmd(app: tauri::AppHandle) -> Result<TimerConfigInfo, String> {
-    let timer_manager = app.state::<Arc<Mutex<TimerManager>>>();
-    let timer = timer_manager.lock().await;
-    Ok(timer.get_config_info())
-}
-
-#[tauri::command]
-fn update_workblock_name_notes_cmd(
-    app: tauri::AppHandle,
-    workblock_id: i64,
-    name: Option<String>,
-    notes: Option<String>,
-) -> Result<Workblock, String> {
-    update_workblock_name_notes(&app, workblock_id, name, notes).map_err(|e| e.to_string())
-}
-
-// Window management commands
-#[tauri::command]
-async fn show_prompt_window_cmd(
-    app: tauri::AppHandle,
-    interval_id: i64,
-) -> Result<(), String> {
-    println!("[WINDOW] show_prompt_window_cmd called with interval_id={}", interval_id);
-    let window_manager = app.state::<Arc<Mutex<WindowManager>>>();
-    let window_mgr = window_manager.lock().await;
-    
-    // Show the prompt window
-    match window_mgr.show_prompt_window(interval_id).await {
-        Ok(_) => {
-            println!("[WINDOW] Successfully showed prompt window");
-        }
-        Err(e) => {
-            eprintln!("[WINDOW] Failed to show prompt window: {}", e);
-            return Err(e);
-        }
-    }
-
-    Ok(())
-}
-
-#[tauri::command]
-async fn hide_prompt_window_cmd(app: tauri::AppHandle) -> Result<(), String> {
-    let window_manager = app.state::<Arc<Mutex<WindowManager>>>();
-    let window_mgr = window_manager.lock().await;
-    
-    // Check if summary is showing - if so, update tray to Idle
-    let was_summary = window_mgr.is_summary_ready().await;
-    
-    window_mgr.hide_prompt_window().await?;
-    
-    // If summary was showing, update tray to Idle
-    if was_summary {
-        let tray_manager = app.state::<Arc<Mutex<TrayManager>>>();
-        let mut tray = tray_manager.lock().await;
-        tray.update_icon_state(crate::tray::TrayIconState::Idle).await;
-    }
-    
-    Ok(())
+    Ok(serde_json::json!({ "interval": interval }))
 }
 
 #[tauri::command]
@@ -269,17 +136,19 @@ fn auto_away_interval(app: tauri::AppHandle, interval_id: i64) -> Result<Interva
 }
 
 #[tauri::command]
-fn get_intervals_by_workblock_cmd(app: tauri::AppHandle, workblock_id: i64) -> Result<Vec<Interval>, String> {
-    get_intervals_by_workblock(&app, workblock_id).map_err(|e| e.to_string())
+fn get_intervals_by_session_cmd(app: tauri::AppHandle, session_id: i64) -> Result<Vec<Interval>, String> {
+    get_intervals_by_session(&app, session_id).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 async fn get_current_interval_cmd(
     app: tauri::AppHandle,
-    workblock_id: i64,
+    session_id: i64,
 ) -> Result<Option<Interval>, String> {
-    get_current_interval(&app, workblock_id).map_err(|e| e.to_string())
+    get_current_interval(&app, session_id).map_err(|e| e.to_string())
 }
+
+// Timer commands
 
 #[tauri::command]
 async fn get_timer_state(app: tauri::AppHandle) -> Result<timer::TimerState, String> {
@@ -291,11 +160,48 @@ async fn get_timer_state(app: tauri::AppHandle) -> Result<timer::TimerState, Str
 #[tauri::command]
 async fn get_interval_time_remaining(app: tauri::AppHandle) -> Result<Option<i64>, String> {
     let timer_manager = app.state::<Arc<Mutex<TimerManager>>>();
-    let timer: tokio::sync::MutexGuard<'_, TimerManager> = timer_manager.lock().await;
+    let timer = timer_manager.lock().await;
     Ok(timer.get_interval_time_remaining().await)
 }
 
-// Daily commands
+#[tauri::command]
+async fn get_timer_config_cmd(app: tauri::AppHandle) -> Result<TimerConfigInfo, String> {
+    let timer_manager = app.state::<Arc<Mutex<TimerManager>>>();
+    let timer = timer_manager.lock().await;
+    Ok(timer.get_config_info())
+}
+
+// Window management commands
+
+#[tauri::command]
+async fn show_prompt_window_cmd(
+    app: tauri::AppHandle,
+    interval_id: i64,
+) -> Result<(), String> {
+    let window_manager = app.state::<Arc<Mutex<WindowManager>>>();
+    let window_mgr = window_manager.lock().await;
+    window_mgr.show_prompt_window(interval_id).await
+}
+
+#[tauri::command]
+async fn hide_prompt_window_cmd(app: tauri::AppHandle) -> Result<(), String> {
+    let window_manager = app.state::<Arc<Mutex<WindowManager>>>();
+    let window_mgr = window_manager.lock().await;
+
+    let was_summary = window_mgr.is_summary_ready().await;
+    window_mgr.hide_prompt_window().await?;
+
+    if was_summary {
+        let tray_manager = app.state::<Arc<Mutex<TrayManager>>>();
+        let mut tray = tray_manager.lock().await;
+        tray.update_icon_state(crate::tray::TrayIconState::Idle).await;
+    }
+
+    Ok(())
+}
+
+// Daily / archive commands
+
 #[tauri::command]
 fn check_and_reset_daily_cmd(app: tauri::AppHandle) -> Result<Option<String>, String> {
     check_and_reset_daily(&app).map_err(|e| e.to_string())
@@ -313,7 +219,6 @@ fn get_archived_day_cmd(app: tauri::AppHandle, date: String) -> Result<Option<Da
 
 #[tauri::command]
 fn get_all_archived_dates_cmd(app: tauri::AppHandle) -> Result<Vec<DailyArchive>, String> {
-    // Archive all unarchived dates before returning (backfill)
     let _ = archive_all_unarchived_dates(&app);
     get_all_archived_dates(&app).map_err(|e| e.to_string())
 }
@@ -321,21 +226,6 @@ fn get_all_archived_dates_cmd(app: tauri::AppHandle) -> Result<Vec<DailyArchive>
 #[tauri::command]
 fn delete_day_cmd(app: tauri::AppHandle, date: String) -> Result<(), String> {
     delete_day(&app, &date).map_err(|e| e.to_string())
-}
-
-// Visualization commands
-#[tauri::command]
-fn get_workblock_visualization(app: tauri::AppHandle, workblock_id: i64) -> Result<String, String> {
-    let viz = generate_workblock_visualization(&app, workblock_id)
-        .map_err(|e| e.to_string())?;
-    serde_json::to_string(&viz).map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-fn get_daily_aggregate_cmd(app: tauri::AppHandle, date: String) -> Result<String, String> {
-    let aggregate = generate_daily_aggregate(&app, &date)
-        .map_err(|e| e.to_string())?;
-    serde_json::to_string(&aggregate).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -351,63 +241,53 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
-            // Initialize database on app startup
             if let Err(e) = init_db(&app.handle()) {
                 eprintln!("Failed to initialize database: {}", e);
             }
-            
-            // Check and reset daily on startup
+
             if let Err(e) = check_and_reset_daily(&app.handle()) {
                 eprintln!("Failed to check daily reset: {}", e);
             }
-            
-            // Initialize timer manager
+
             let timer_manager = Arc::new(Mutex::new(TimerManager::new(app.handle().clone())));
             app.manage(timer_manager.clone());
-            
-            // Initialize tray manager
+
             let tray_manager = Arc::new(Mutex::new(TrayManager::new(app.handle().clone())));
             app.manage(tray_manager.clone());
-            
-            // Initialize window manager
+
             let window_manager = Arc::new(Mutex::new(WindowManager::new(app.handle().clone())));
             app.manage(window_manager);
-            
-            // Setup system tray
+
             if let Err(e) = TrayManager::setup_tray(&app.handle()) {
                 eprintln!("Failed to setup system tray: {}", e);
             }
-            
-            // Restore active workblock if one exists (for app restart scenarios)
-            // Use Tauri's async runtime instead of tokio::spawn
+
             let timer_clone = timer_manager.clone();
             let tray_clone = tray_manager.clone();
             async_runtime::spawn(async move {
                 let timer = timer_clone.lock().await;
-                if let Err(e) = timer.restore_active_workblock().await {
-                    eprintln!("Failed to restore active workblock: {}", e);
+                if let Err(e) = timer.restore_active_session().await {
+                    eprintln!("Failed to restore active session: {}", e);
                 }
                 drop(timer);
-                
-                // Refresh tray state after restoring workblock
+
                 let mut tray = tray_clone.lock().await;
                 tray.refresh_state().await;
             });
-            
+
             Ok(())
         })
         .on_tray_icon_event(|app, event| {
             TrayManager::handle_tray_event(app, event);
         })
         .on_menu_event(|app, event| {
-            // Handle menu item clicks
             let id_str = event.id.0.as_str();
             match id_str {
-                "start_workblock" => {
+                "start_session" => {
                     if let Some(window) = app.get_webview_window("main") {
                         let _ = window.show();
                         let _ = window.set_focus();
-                        let _ = window.emit("tray-start-workblock", ());
+                        let _ = window.emit("tray-start-session", ());
                     }
                 }
                 "view_summary" => {
@@ -442,31 +322,25 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
-            greet,
             init_database,
-            start_workblock,
-            cancel_workblock_cmd,
-            get_active_workblock_cmd,
-            get_workblocks_by_date_cmd,
-            get_today_workblocks,
+            start_session_cmd,
+            stop_session_cmd,
+            get_active_session_cmd,
             create_interval,
             submit_interval_words,
             auto_away_interval,
-            get_intervals_by_workblock_cmd,
+            get_intervals_by_session_cmd,
             get_current_interval_cmd,
             check_and_reset_daily_cmd,
             get_today_date_cmd,
             get_archived_day_cmd,
             get_all_archived_dates_cmd,
-            get_workblock_visualization,
-            get_daily_aggregate_cmd,
             get_daily_visualization_data_cmd,
             get_timer_state,
             get_interval_time_remaining,
             get_timer_config_cmd,
             show_prompt_window_cmd,
             hide_prompt_window_cmd,
-            update_workblock_name_notes_cmd,
             delete_day_cmd,
         ])
         .run(tauri::generate_context!())
