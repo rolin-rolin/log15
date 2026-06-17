@@ -112,7 +112,7 @@ impl TrayManager {
         self.current_state
     }
 
-    /// Update tray state based on workblock status
+    /// Update tray state based on session status
     pub async fn refresh_state(&mut self) {
         let has_active = get_active_session(&self.app).is_ok_and(|opt| opt.is_some());
 

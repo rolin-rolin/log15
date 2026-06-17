@@ -2,6 +2,8 @@ pub mod db;
 pub mod timer;
 pub mod tray;
 pub mod window_manager;
+#[cfg(test)]
+mod db_test;
 
 pub use tray::TrayManager;
 

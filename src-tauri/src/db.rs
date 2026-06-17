@@ -1,11 +1,11 @@
 use rusqlite::{Connection, Result, params};
 use std::path::PathBuf;
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Manager, Runtime};
 use chrono::Local;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-fn get_db_path(app: &AppHandle) -> PathBuf {
+fn get_db_path<R: Runtime>(app: &AppHandle<R>) -> PathBuf {
     let app_data_dir = app
         .path()
         .app_data_dir()
@@ -14,7 +14,7 @@ fn get_db_path(app: &AppHandle) -> PathBuf {
     app_data_dir.join("log15.db")
 }
 
-pub fn init_db(app: &AppHandle) -> Result<Connection> {
+pub fn init_db<R: Runtime>(app: &AppHandle<R>) -> Result<Connection> {
     let db_path = get_db_path(app);
     let conn = Connection::open(&db_path)?;
 
@@ -123,11 +123,11 @@ pub fn init_db(app: &AppHandle) -> Result<Connection> {
 
     // Migrate daily_archives: add total_sessions column if old schema
     let _ = conn.execute("ALTER TABLE daily_archives ADD COLUMN total_sessions INTEGER DEFAULT 0", []);
-    conn.execute(
+    let _ = conn.execute(
         "UPDATE daily_archives SET total_sessions = COALESCE(total_workblocks, 0)
          WHERE (total_sessions IS NULL OR total_sessions = 0) AND total_workblocks IS NOT NULL",
         [],
-    )?;
+    );
 
     // Indexes
     conn.execute("CREATE INDEX IF NOT EXISTS idx_sessions_date ON sessions(date)", [])?;
@@ -137,7 +137,7 @@ pub fn init_db(app: &AppHandle) -> Result<Connection> {
     Ok(conn)
 }
 
-pub fn get_db_connection(app: &AppHandle) -> Result<Connection> {
+pub fn get_db_connection<R: Runtime>(app: &AppHandle<R>) -> Result<Connection> {
     let db_path = get_db_path(app);
     Connection::open(&db_path)
 }
@@ -229,7 +229,7 @@ pub struct DailyArchive {
 // Session Operations
 // ============================================================================
 
-pub fn create_session(app: &AppHandle) -> Result<Session> {
+pub fn create_session<R: Runtime>(app: &AppHandle<R>) -> Result<Session> {
     let conn = get_db_connection(app)?;
     let now = Local::now();
     let date = now.format("%Y-%m-%d").to_string();
@@ -244,7 +244,7 @@ pub fn create_session(app: &AppHandle) -> Result<Session> {
     Ok(Session { id: Some(id), date, start_time, end_time: None, status: SessionStatus::Active })
 }
 
-pub fn get_active_session(app: &AppHandle) -> Result<Option<Session>> {
+pub fn get_active_session<R: Runtime>(app: &AppHandle<R>) -> Result<Option<Session>> {
     let conn = get_db_connection(app)?;
     let result = conn.query_row(
         "SELECT id, date, start_time, end_time, status FROM sessions
@@ -266,7 +266,7 @@ pub fn get_active_session(app: &AppHandle) -> Result<Option<Session>> {
     }
 }
 
-pub fn get_session_by_id(app: &AppHandle, session_id: i64) -> Result<Session> {
+pub fn get_session_by_id<R: Runtime>(app: &AppHandle<R>, session_id: i64) -> Result<Session> {
     let conn = get_db_connection(app)?;
     conn.query_row(
         "SELECT id, date, start_time, end_time, status FROM sessions WHERE id = ?1",
@@ -281,7 +281,7 @@ pub fn get_session_by_id(app: &AppHandle, session_id: i64) -> Result<Session> {
     )
 }
 
-pub fn stop_session(app: &AppHandle, session_id: i64) -> Result<Session> {
+pub fn stop_session<R: Runtime>(app: &AppHandle<R>, session_id: i64) -> Result<Session> {
     let conn = get_db_connection(app)?;
     let end_time = Local::now().to_rfc3339();
 
@@ -299,7 +299,7 @@ pub fn stop_session(app: &AppHandle, session_id: i64) -> Result<Session> {
     get_session_by_id(app, session_id)
 }
 
-pub fn get_sessions_by_date(app: &AppHandle, date: &str) -> Result<Vec<Session>> {
+pub fn get_sessions_by_date<R: Runtime>(app: &AppHandle<R>, date: &str) -> Result<Vec<Session>> {
     let conn = get_db_connection(app)?;
     let mut stmt = conn.prepare(
         "SELECT id, date, start_time, end_time, status FROM sessions
@@ -325,7 +325,7 @@ pub fn get_sessions_by_date(app: &AppHandle, date: &str) -> Result<Vec<Session>>
 // Interval Operations
 // ============================================================================
 
-pub fn add_interval(app: &AppHandle, session_id: i64, interval_number: i32) -> Result<Interval> {
+pub fn add_interval<R: Runtime>(app: &AppHandle<R>, session_id: i64, interval_number: i32) -> Result<Interval> {
     let conn = get_db_connection(app)?;
     let start_time = Local::now().to_rfc3339();
 
@@ -348,8 +348,8 @@ pub fn add_interval(app: &AppHandle, session_id: i64, interval_number: i32) -> R
     })
 }
 
-pub fn update_interval_words(
-    app: &AppHandle,
+pub fn update_interval_words<R: Runtime>(
+    app: &AppHandle<R>,
     interval_id: i64,
     words: String,
     status: IntervalStatus,
@@ -365,7 +365,7 @@ pub fn update_interval_words(
     get_interval_by_id(app, interval_id)
 }
 
-pub fn get_interval_by_id(app: &AppHandle, interval_id: i64) -> Result<Interval> {
+pub fn get_interval_by_id<R: Runtime>(app: &AppHandle<R>, interval_id: i64) -> Result<Interval> {
     let conn = get_db_connection(app)?;
     conn.query_row(
         "SELECT id, session_id, interval_number, start_time, end_time, words, status, recorded_at
@@ -384,7 +384,7 @@ pub fn get_interval_by_id(app: &AppHandle, interval_id: i64) -> Result<Interval>
     )
 }
 
-pub fn get_intervals_by_session(app: &AppHandle, session_id: i64) -> Result<Vec<Interval>> {
+pub fn get_intervals_by_session<R: Runtime>(app: &AppHandle<R>, session_id: i64) -> Result<Vec<Interval>> {
     let conn = get_db_connection(app)?;
     let mut stmt = conn.prepare(
         "SELECT id, session_id, interval_number, start_time, end_time, words, status, recorded_at
@@ -409,7 +409,7 @@ pub fn get_intervals_by_session(app: &AppHandle, session_id: i64) -> Result<Vec<
     Ok(intervals)
 }
 
-pub fn get_current_interval(app: &AppHandle, session_id: i64) -> Result<Option<Interval>> {
+pub fn get_current_interval<R: Runtime>(app: &AppHandle<R>, session_id: i64) -> Result<Option<Interval>> {
     let conn = get_db_connection(app)?;
     let result = conn.query_row(
         "SELECT id, session_id, interval_number, start_time, end_time, words, status, recorded_at
@@ -443,7 +443,7 @@ pub fn get_today_date() -> String {
     Local::now().format("%Y-%m-%d").to_string()
 }
 
-pub fn check_and_reset_daily(app: &AppHandle) -> Result<Option<String>> {
+pub fn check_and_reset_daily<R: Runtime>(app: &AppHandle<R>) -> Result<Option<String>> {
     let today = get_today_date();
     let conn = get_db_connection(app)?;
 
@@ -484,7 +484,7 @@ pub fn check_and_reset_daily(app: &AppHandle) -> Result<Option<String>> {
     Ok(None)
 }
 
-pub fn archive_all_unarchived_dates(app: &AppHandle) -> Result<Vec<String>> {
+pub fn archive_all_unarchived_dates<R: Runtime>(app: &AppHandle<R>) -> Result<Vec<String>> {
     let today = get_today_date();
     let conn = get_db_connection(app)?;
 
@@ -508,7 +508,7 @@ pub fn archive_all_unarchived_dates(app: &AppHandle) -> Result<Vec<String>> {
     Ok(archived)
 }
 
-pub fn archive_daily_data(app: &AppHandle, date: &str) -> Result<DailyArchive> {
+pub fn archive_daily_data<R: Runtime>(app: &AppHandle<R>, date: &str) -> Result<DailyArchive> {
     let conn = get_db_connection(app)?;
     let sessions = get_sessions_by_date(app, date)?;
 
@@ -549,10 +549,10 @@ pub fn archive_daily_data(app: &AppHandle, date: &str) -> Result<DailyArchive> {
     })
 }
 
-pub fn get_archived_day(app: &AppHandle, date: &str) -> Result<Option<DailyArchive>> {
+pub fn get_archived_day<R: Runtime>(app: &AppHandle<R>, date: &str) -> Result<Option<DailyArchive>> {
     let conn = get_db_connection(app)?;
     let result = conn.query_row(
-        "SELECT id, date, COALESCE(total_sessions, total_workblocks, 0), total_minutes, visualization_data, archived_at
+        "SELECT id, date, COALESCE(total_sessions, 0), total_minutes, visualization_data, archived_at
          FROM daily_archives WHERE date = ?1",
         params![date],
         |r| Ok(DailyArchive {
@@ -572,10 +572,10 @@ pub fn get_archived_day(app: &AppHandle, date: &str) -> Result<Option<DailyArchi
     }
 }
 
-pub fn get_all_archived_dates(app: &AppHandle) -> Result<Vec<DailyArchive>> {
+pub fn get_all_archived_dates<R: Runtime>(app: &AppHandle<R>) -> Result<Vec<DailyArchive>> {
     let conn = get_db_connection(app)?;
     let mut stmt = conn.prepare(
-        "SELECT id, date, COALESCE(total_sessions, total_workblocks, 0), total_minutes, visualization_data, archived_at
+        "SELECT id, date, COALESCE(total_sessions, 0), total_minutes, visualization_data, archived_at
          FROM daily_archives ORDER BY date DESC",
     )?;
 
@@ -595,7 +595,7 @@ pub fn get_all_archived_dates(app: &AppHandle) -> Result<Vec<DailyArchive>> {
     Ok(archives)
 }
 
-pub fn delete_day(app: &AppHandle, date: &str) -> Result<()> {
+pub fn delete_day<R: Runtime>(app: &AppHandle<R>, date: &str) -> Result<()> {
     let conn = get_db_connection(app)?;
     conn.execute("DELETE FROM daily_archives WHERE date = ?1", params![date])?;
     conn.execute("DELETE FROM sessions WHERE date = ?1", params![date])?;
@@ -630,7 +630,7 @@ pub struct DailyVisualizationData {
     pub activity_data: Vec<ActivityData>,
 }
 
-pub fn generate_daily_visualization_data(app: &AppHandle, date: &str) -> Result<DailyVisualizationData> {
+pub fn generate_daily_visualization_data<R: Runtime>(app: &AppHandle<R>, date: &str) -> Result<DailyVisualizationData> {
     let sessions = get_sessions_by_date(app, date)?;
 
     let mut all_intervals: Vec<Interval> = Vec::new();
