@@ -1,5 +1,5 @@
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from "recharts";
-import type { ActivityData } from "../types/workblock";
+import type { ActivityData } from "../types/session";
 
 interface ActivityChartProps {
     activityData: ActivityData[];

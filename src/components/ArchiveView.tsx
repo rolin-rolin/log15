@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import type { DailyArchive } from "../types/workblock";
+import type { DailyArchive } from "../types/session";
 import SummaryView from "./SummaryView";
 import "./ArchiveView.css";
 
@@ -114,7 +114,7 @@ export default function ArchiveView({ onBack }: { onBack?: () => void }) {
                                         <div className="archive-item-date">{formatDate(archive.date)}</div>
                                         <div className="archive-item-stats">
                                             <span>
-                                                {archive.total_workblocks} workblock{archive.total_workblocks !== 1 ? "s" : ""}
+                                                {archive.total_sessions} session{archive.total_sessions !== 1 ? "s" : ""}
                                             </span>
                                             <span>•</span>
                                             <span>

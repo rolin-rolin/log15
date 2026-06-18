@@ -17,7 +17,7 @@ export default function SummaryReadyPage() {
                 <div className="summary-ready-content">
                     <div className="summary-icon">📊</div>
                     <h3 className="summary-title">Summary Ready!</h3>
-                    <p className="summary-message">Your workblock summary is ready to view.</p>
+                    <p className="summary-message">Your session summary is ready to view.</p>
                     <button onClick={handleClose} className="close-summary-button">
                         Close
                     </button>
