@@ -16,5 +16,5 @@ Stage 1 is done. Here's a summary of what was changed:
 - tray.rs: Renamed start_workblock variable to start_session, updated the three TrayIconState enum comments from "workblock" to "session"
 - window_manager.rs: Removed three #region agent log debug blocks that were writing to .cursor/debug.log (leftover from the previous debugging session)
 
-Stage 2 (tests) — not started:
-db_test.rs is entirely broken against the new API. It calls functions that no longer exist: create_workblock(), complete_workblock(), generate_workblock_visualization(), get_intervals_by_workblock(), generate_daily_aggregate(). These all need to be rewritten against the current session-based API.
+Stage 2 (tests) — done:
+db_test.rs fully rewritten against the session-based API. All 4 tests pass. Also fixed db.rs: made all functions generic over R: Runtime for MockRuntime compatibility, made total_workblocks migration UPDATE best-effort, and simplified COALESCE in get_archived_day/get_all_archived_dates.
