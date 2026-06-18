@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import type { Workblock, TimerState } from "../types/workblock";
+import type { Session, TimerState } from "../types/session";
 import "./WorkblockControl.css";
 
 type TimerConfigInfo = {
@@ -17,28 +17,23 @@ interface WorkblockControlProps {
 }
 
 export default function WorkblockControl({ onNavigateToSummary, onNavigateToArchive }: WorkblockControlProps) {
-    const [activeWorkblock, setActiveWorkblock] = useState<Workblock | null>(null);
+    const [activeSession, setActiveSession] = useState<Session | null>(null);
     const [timerState, setTimerState] = useState<TimerState | null>(null);
     const [timerConfig, setTimerConfig] = useState<TimerConfigInfo | null>(null);
-    const [hours, setHours] = useState<number>(1);
-    const [minutes, setMinutes] = useState<number>(0);
     const [timeRemaining, setTimeRemaining] = useState<number | null>(null);
     const [loading, setLoading] = useState(false);
     const [showInfo, setShowInfo] = useState(false);
 
-    const duration = hours * 60 + minutes;
-    const minuteOptions = timerConfig?.dev_mode ? [0, 1, 15, 30, 45] : [0, 15, 30, 45];
-
     useEffect(() => {
-        loadActiveWorkblock();
+        loadActiveSession();
         loadTimerState();
         loadTimerConfig();
 
         const interval = setInterval(loadTimerState, 1000);
 
         let unlistenPromise: Promise<() => void> | null = null;
-        listen("workblock-complete", async () => {
-            await loadActiveWorkblock();
+        listen("session-stopped", async () => {
+            await loadActiveSession();
             await loadTimerState();
         }).then(fn => { unlistenPromise = Promise.resolve(fn); });
 
@@ -48,19 +43,15 @@ export default function WorkblockControl({ onNavigateToSummary, onNavigateToArch
         };
     }, []);
 
-    useEffect(() => {
-        if (!timerConfig?.dev_mode && minutes === 1) setMinutes(15);
-    }, [timerConfig?.dev_mode, minutes]);
-
     const loadTimerConfig = async () => {
         try {
             setTimerConfig(await invoke<TimerConfigInfo>("get_timer_config_cmd"));
         } catch { /* older backend */ }
     };
 
-    const loadActiveWorkblock = async () => {
+    const loadActiveSession = async () => {
         try {
-            setActiveWorkblock(await invoke<Workblock | null>("get_active_workblock_cmd"));
+            setActiveSession(await invoke<Session | null>("get_active_session_cmd"));
         } catch (e) { console.error(e); }
     };
 
@@ -75,25 +66,25 @@ export default function WorkblockControl({ onNavigateToSummary, onNavigateToArch
     const handleStart = async () => {
         setLoading(true);
         try {
-            setActiveWorkblock(await invoke<Workblock>("start_workblock", { durationMinutes: duration }));
+            setActiveSession(await invoke<Session>("start_session_cmd"));
             await loadTimerState();
         } catch (e) {
-            alert(`Failed to start workblock: ${e}`);
+            alert(`Failed to start session: ${e}`);
         } finally {
             setLoading(false);
         }
     };
 
-    const handleCancel = async () => {
-        if (!activeWorkblock?.id) return;
+    const handleStop = async () => {
+        if (!activeSession?.id) return;
         setLoading(true);
         try {
             try { await invoke("hide_prompt_window_cmd"); } catch { /* ignore */ }
-            await invoke("cancel_workblock_cmd", { workblockId: activeWorkblock.id });
-            await loadActiveWorkblock();
+            await invoke("stop_session_cmd", { sessionId: activeSession.id });
+            await loadActiveSession();
             await loadTimerState();
         } catch (e) {
-            alert(`Failed to cancel workblock: ${e}`);
+            alert(`Failed to stop session: ${e}`);
         } finally {
             setLoading(false);
         }
@@ -103,13 +94,6 @@ export default function WorkblockControl({ onNavigateToSummary, onNavigateToArch
         const m = Math.floor(seconds / 60);
         const s = seconds % 60;
         return `${m}:${String(s).padStart(2, "0")}`;
-    };
-
-    const fmtDuration = (mins: number) => {
-        if (mins < 60) return `${mins}m`;
-        const h = Math.floor(mins / 60);
-        const m = mins % 60;
-        return m > 0 ? `${h}h ${m}m` : `${h}h`;
     };
 
     const fmtTime = (iso: string) =>
@@ -140,9 +124,9 @@ export default function WorkblockControl({ onNavigateToSummary, onNavigateToArch
                 </div>
             </div>
 
-            {activeWorkblock ? (
+            {activeSession ? (
                 <div className="wbc-card">
-                    <p className="wbc-card-title">Active Workblock</p>
+                    <p className="wbc-card-title">Active Session</p>
 
                     {timerState?.is_running && timeRemaining !== null && (
                         <div className="wbc-timer">{fmt(timeRemaining)}</div>
@@ -150,14 +134,8 @@ export default function WorkblockControl({ onNavigateToSummary, onNavigateToArch
 
                     <div className="wbc-rows">
                         <div className="wbc-row">
-                            <span className="wbc-row-label">Duration</span>
-                            <span className="wbc-row-value">
-                                {fmtDuration(activeWorkblock.duration_minutes || 0)}
-                            </span>
-                        </div>
-                        <div className="wbc-row">
                             <span className="wbc-row-label">Started</span>
-                            <span className="wbc-row-value">{fmtTime(activeWorkblock.start_time)}</span>
+                            <span className="wbc-row-value">{fmtTime(activeSession.start_time)}</span>
                         </div>
                         {timerState?.is_running && (
                             <div className="wbc-row">
@@ -171,53 +149,20 @@ export default function WorkblockControl({ onNavigateToSummary, onNavigateToArch
                         )}
                     </div>
 
-                    <button className="wbc-btn-danger" onClick={handleCancel} disabled={loading}>
-                        {loading ? "Cancelling…" : "Cancel Workblock"}
+                    <button className="wbc-btn-danger" onClick={handleStop} disabled={loading}>
+                        {loading ? "Stopping…" : "Stop Session"}
                     </button>
                 </div>
             ) : (
                 <div className="wbc-card">
-                    <p className="wbc-form-title">New Workblock</p>
-
-                    <div className="wbc-duration-row">
-                        <div className="wbc-duration-field">
-                            <span className="wbc-duration-label">Hours</span>
-                            <select
-                                className="wbc-select"
-                                value={hours}
-                                onChange={e => setHours(Number(e.target.value))}
-                            >
-                                {[0, 1, 2, 3, 4].map(h => (
-                                    <option key={h} value={h}>{h}h</option>
-                                ))}
-                            </select>
-                        </div>
-                        <div className="wbc-duration-field">
-                            <span className="wbc-duration-label">Minutes</span>
-                            <select
-                                className="wbc-select"
-                                value={minutes}
-                                onChange={e => setMinutes(Number(e.target.value))}
-                            >
-                                {minuteOptions.map(m => (
-                                    <option key={m} value={m}>{m}m</option>
-                                ))}
-                            </select>
-                        </div>
-                    </div>
-
-                    <p className="wbc-duration-hint">
-                        {duration === 0
-                            ? "Minimum duration is 15 minutes"
-                            : `${fmtDuration(duration)} · ${duration / 15} interval${duration / 15 !== 1 ? "s" : ""}`}
-                    </p>
+                    <p className="wbc-form-title">New Session</p>
 
                     <button
                         className="wbc-btn-primary"
                         onClick={handleStart}
-                        disabled={loading || duration === 0}
+                        disabled={loading}
                     >
-                        {loading ? "Starting…" : "Start Workblock"}
+                        {loading ? "Starting…" : "Start Session"}
                     </button>
                 </div>
             )}
@@ -241,7 +186,7 @@ export default function WorkblockControl({ onNavigateToSummary, onNavigateToArch
                         <ul>
                             <li>Every 15 minutes you'll be prompted to enter 1–2 words about what you're doing</li>
                             <li>The prompt appears in the top-right corner of your screen</li>
-                            <li>At the end of your workblock, review your summary</li>
+                            <li>Stop the session when you're done to review your summary</li>
                             <li>No response within 10 minutes → "Away from workspace" is recorded</li>
                         </ul>
                         <div className="wbc-tooltip-arrow" />

@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import PromptPage from "./pages/PromptPage";
 import SummaryReadyPage from "./pages/SummaryReadyPage";
-import WorkblockControl from "./components/WorkblockControl";
+import SessionControl from "./components/SessionControl";
 import SummaryView from "./components/SummaryView";
 import ArchiveView from "./components/ArchiveView";
 import "./App.css";
@@ -94,7 +94,7 @@ function App() {
             });
 
             // Listen for tray navigation events
-            unlistenStart = listen("tray-start-workblock", () => {
+            unlistenStart = listen("tray-start-session", () => {
                 setCurrentView("main");
             });
 
@@ -155,7 +155,7 @@ function App() {
 
     return (
         <main className="container">
-            <WorkblockControl
+            <SessionControl
                 onNavigateToSummary={() => setCurrentView("summary")}
                 onNavigateToArchive={() => setCurrentView("archive")}
             />
