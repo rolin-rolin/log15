@@ -13,7 +13,12 @@ log15 rework plan
    - tray.rs verified: "start_session" menu item id matches "start_session" handler in lib.rs.
    - SummaryView.tsx / SessionControl.tsx: no orphaned console.logs found.
    - All 4 Rust tests pass, TypeScript zero errors.
-6. Final push/verify
+6. Final verify — done:
+   - Fixed two remaining workblock references in SessionControl.tsx (interface and function name were never updated during the rename).
+   - Full sweep: zero workblock references across all .ts, .tsx, and .rs files.
+   - Rust: 4/4 tests pass.
+   - TypeScript: zero errors.
+   - Frontend production build: clean.
 
 Stage 1 is done. Here's a summary of what was changed:
 

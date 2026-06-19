@@ -11,12 +11,12 @@ type TimerConfigInfo = {
     logical_interval_minutes: number;
 };
 
-interface WorkblockControlProps {
+interface SessionControlProps {
     onNavigateToSummary?: () => void;
     onNavigateToArchive?: () => void;
 }
 
-export default function WorkblockControl({ onNavigateToSummary, onNavigateToArchive }: WorkblockControlProps) {
+export default function SessionControl({ onNavigateToSummary, onNavigateToArchive }: SessionControlProps) {
     const [activeSession, setActiveSession] = useState<Session | null>(null);
     const [timerState, setTimerState] = useState<TimerState | null>(null);
     const [timerConfig, setTimerConfig] = useState<TimerConfigInfo | null>(null);
