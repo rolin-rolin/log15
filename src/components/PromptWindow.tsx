@@ -7,8 +7,6 @@ interface PromptWindowProps {
     intervalId: number | null;
 }
 
-const CHECKMARK_DURATION_MS = 2000; // 2 seconds
-
 export default function PromptWindow({ intervalId }: PromptWindowProps) {
     const [words, setWords] = useState("");
     const [showCheckmark, setShowCheckmark] = useState(false);
@@ -17,47 +15,28 @@ export default function PromptWindow({ intervalId }: PromptWindowProps) {
     const intervalIdRef = useRef<number | null>(null);
 
     useEffect(() => {
-        console.log("[PROMPT_WINDOW] intervalId changed:", intervalId);
         intervalIdRef.current = intervalId;
         if (intervalId) {
-            console.log("[PROMPT_WINDOW] Setting isVisible to true");
             setIsVisible(true);
-            // Reset state when new interval comes in
             setShowCheckmark(false);
             showCheckmarkRef.current = false;
             setWords("");
         }
     }, [intervalId]);
 
-    // Keep ref in sync with state
     useEffect(() => {
         showCheckmarkRef.current = showCheckmark;
     }, [showCheckmark]);
 
     useEffect(() => {
-        // #region agent log
-        fetch('http://127.0.0.1:7243/ingest/e1aff560-78fd-4480-b3b6-3bd988b7d39c',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'PromptWindow.tsx:39','message':'Setting up event listeners',data:{intervalId:intervalId},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
-        // #endregion
-        // Listen for hide event
-        const unlisten = listen("prompt-hide", () => {
-            console.log("[PROMPT_WINDOW] Received prompt-hide event");
-            handleFadeOut();
-        });
+        const unlisten = listen("prompt-hide", () => handleFadeOut());
 
-        // Listen for auto-away event (window should close for non-last intervals)
         const unlistenAutoAway = listen("auto-away", () => {
-            console.log("[PROMPT_WINDOW] Received auto-away event, closing window");
             handleFadeOut();
-            // Also call hide command to ensure window is closed
             invoke("hide_prompt_window_cmd").catch(console.error);
         });
 
-        // No longer need to listen for show-summary-ready - backend closes and reopens window
-
-        // Listen for close summary event
-        const unlistenClose = listen("close-summary", () => {
-            handleFadeOut();
-        });
+        const unlistenClose = listen("close-summary", () => handleFadeOut());
 
         return () => {
             unlisten.then((fn) => fn());
@@ -72,32 +51,21 @@ export default function PromptWindow({ intervalId }: PromptWindowProps) {
             setWords("");
             setShowCheckmark(false);
             showCheckmarkRef.current = false;
-        }, 300); // Wait for fade-out animation
+        }, 300);
     };
 
     const handleSubmit = async () => {
-        if (!intervalId || !words.trim()) {
-            return;
-        }
+        if (!intervalId || !words.trim()) return;
 
-        // Show checkmark immediately
         setShowCheckmark(true);
         showCheckmarkRef.current = true;
 
-        // Submit words
         try {
-            const result = await invoke<{ is_last_interval: boolean }>("submit_interval_words", {
-                intervalId: intervalId,
+            await invoke("submit_interval_words", {
+                intervalId,
                 words: words.trim(),
             });
-
-            // For non-last intervals, close window after the checkmark duration.
-            // For the last interval, the backend will close/reopen the window as "summary-ready".
-            if (!result?.is_last_interval) {
-                setTimeout(() => {
-                    invoke("hide_prompt_window_cmd").catch(console.error);
-                }, CHECKMARK_DURATION_MS);
-            }
+            // Backend closes the window after the checkmark animation
         } catch (error) {
             console.error("Failed to submit words:", error);
             setShowCheckmark(false);

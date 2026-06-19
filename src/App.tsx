@@ -10,10 +10,8 @@ import "./App.css";
 
 function App() {
     const [currentView, setCurrentView] = useState<string>("main");
-    // Use a ref to track handled intervals across renders
     const handledIntervalsRef = useRef<Set<number>>(new Set());
 
-    // Check window type on mount (for prompt window detection)
     useEffect(() => {
         let unlistenPromise: Promise<() => void> | null = null;
         let unlistenStart: Promise<() => void> | null = null;
@@ -23,69 +21,41 @@ function App() {
         const checkWindowType = async () => {
             try {
                 const { getCurrentWindow } = await import("@tauri-apps/api/window");
-                const currentWindow = getCurrentWindow();
-                const label = currentWindow.label;
-                console.log("[APP] Window type check - label:", label, "hash:", window.location.hash);
+                const label = getCurrentWindow().label;
 
                 if (label === "prompt") {
-                    // Check if it's summary-ready or prompt
                     const hash = window.location.hash;
-                    if (hash.includes("summary-ready")) {
-                        console.log("[APP] Detected summary-ready window via label");
-                        setCurrentView("summary-ready");
-                    } else {
-                        console.log("[APP] Detected prompt window via label, switching to prompt view");
-                        setCurrentView("prompt");
-                    }
+                    setCurrentView(hash.includes("summary-ready") ? "summary-ready" : "prompt");
                     return;
                 }
             } catch (error) {
-                console.error("[APP] Error in window type check:", error);
+                console.error("Error in window type check:", error);
             }
 
-            // Fallback: check hash
             const hash = window.location.hash;
-            if (hash === "#/prompt" || hash === "/prompt" || hash.startsWith("#/prompt") || hash.startsWith("/prompt")) {
-                console.log("[APP] Detected prompt window via hash");
+            if (hash.startsWith("#/prompt") || hash.startsWith("/prompt")) {
                 setCurrentView("prompt");
                 return;
             }
-            if (hash === "#/summary-ready" || hash === "/summary-ready" || hash.startsWith("#/summary-ready") || hash.startsWith("/summary-ready")) {
-                console.log("[APP] Detected summary-ready window via hash");
+            if (hash.startsWith("#/summary-ready") || hash.startsWith("/summary-ready")) {
                 setCurrentView("summary-ready");
                 return;
             }
 
-            // If we get here, we're in the main window
-            console.log("[APP] Main window detected, setting up listeners");
-
-            // Listen for interval-complete event to show prompt window
+            // Main window — set up listeners
             const setupListeners = async () => {
                 const unlisten = await listen("interval-complete", async (event: any) => {
-                    console.log("[FRONTEND] Received interval-complete event:", event.payload);
-                    const payload = event.payload as { interval_id?: number; interval_number?: number };
-                    if (payload.interval_id) {
-                        // Prevent duplicate handling of the same interval
-                        if (handledIntervalsRef.current.has(payload.interval_id)) {
-                            console.log("[FRONTEND] Already handled interval_id:", payload.interval_id, "skipping");
-                            return;
-                        }
-                        handledIntervalsRef.current.add(payload.interval_id);
-
-                        console.log("[FRONTEND] Calling show_prompt_window_cmd with intervalId:", payload.interval_id);
-                        try {
-                            await invoke("show_prompt_window_cmd", { intervalId: payload.interval_id });
-                            console.log("[FRONTEND] show_prompt_window_cmd succeeded");
-                        } catch (error) {
-                            console.error("[FRONTEND] Failed to show prompt window:", error);
-                            // Remove from set on error so we can retry
-                            handledIntervalsRef.current.delete(payload.interval_id);
-                        }
-                    } else {
-                        console.warn("[FRONTEND] interval-complete event missing interval_id");
+                    const payload = event.payload as { interval_id?: number };
+                    if (!payload.interval_id) return;
+                    if (handledIntervalsRef.current.has(payload.interval_id)) return;
+                    handledIntervalsRef.current.add(payload.interval_id);
+                    try {
+                        await invoke("show_prompt_window_cmd", { intervalId: payload.interval_id });
+                    } catch (error) {
+                        console.error("Failed to show prompt window:", error);
+                        handledIntervalsRef.current.delete(payload.interval_id);
                     }
                 });
-
                 return unlisten;
             };
 
@@ -93,35 +63,14 @@ function App() {
                 unlistenPromise = Promise.resolve(unlisten);
             });
 
-            // Listen for tray navigation events
-            unlistenStart = listen("tray-start-session", () => {
-                setCurrentView("main");
-            });
-
-            unlistenSummary = listen("tray-view-summary", () => {
-                setCurrentView("summary");
-            });
-
-            unlistenLastWords = listen("tray-view-last-words", () => {
-                setCurrentView("main");
-                // TODO: Show last words
-            });
+            unlistenStart = listen("tray-start-session", () => setCurrentView("main"));
+            unlistenSummary = listen("tray-view-summary", () => setCurrentView("summary"));
+            unlistenLastWords = listen("tray-view-last-words", () => setCurrentView("main"));
         };
 
-        // Check immediately
         checkWindowType();
 
-        // Also check after delays (in case React hasn't fully mounted)
-        const timeoutId = setTimeout(() => {
-            checkWindowType();
-        }, 100);
-        const timeoutId2 = setTimeout(() => {
-            checkWindowType();
-        }, 500);
-
         return () => {
-            clearTimeout(timeoutId);
-            clearTimeout(timeoutId2);
             unlistenPromise?.then((fn) => fn());
             unlistenStart?.then((fn) => fn());
             unlistenSummary?.then((fn) => fn());
@@ -129,13 +78,8 @@ function App() {
         };
     }, []);
 
-    if (currentView === "prompt") {
-        return <PromptPage />;
-    }
-
-    if (currentView === "summary-ready") {
-        return <SummaryReadyPage />;
-    }
+    if (currentView === "prompt") return <PromptPage />;
+    if (currentView === "summary-ready") return <SummaryReadyPage />;
 
     if (currentView === "summary") {
         return (

@@ -5,7 +5,6 @@ import PromptWindow from "../components/PromptWindow";
 import "../components/PromptWindow.css";
 
 export default function PromptPage() {
-    // Initialize intervalId synchronously from URL to avoid loading screen flash
     const getInitialIntervalId = (): number | null => {
         const hash = window.location.hash;
         const hashMatch = hash.match(/[?&]intervalId=(\d+)/);
@@ -19,12 +18,8 @@ export default function PromptPage() {
     const [intervalId, setIntervalId] = useState<number | null>(getInitialIntervalId);
 
     useEffect(() => {
-        console.log("[PROMPT_PAGE] Component mounted! Setting up event listeners");
-
-        // Listen for interval ID from backend (fallback - URL should have it already)
         const setupListeners = async () => {
             const unlisten = await listen<number>("prompt-interval-id", (event) => {
-                console.log("[PROMPT_PAGE] Received prompt-interval-id event:", event.payload);
                 setIntervalId(event.payload);
             });
             return unlisten;
@@ -35,13 +30,8 @@ export default function PromptPage() {
             unlistenPromise = Promise.resolve(unlisten);
         });
 
-        // Listen for hide event
         const unlistenHide = listen("prompt-hide", () => {
-            console.log("[PROMPT_PAGE] Received prompt-hide event");
-            // Trigger fade-out, then hide
-            setTimeout(() => {
-                setIntervalId(null);
-            }, 300);
+            setTimeout(() => setIntervalId(null), 300);
         });
 
         return () => {
