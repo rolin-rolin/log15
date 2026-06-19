@@ -4,15 +4,15 @@ log15 rework plan
 2. Rewrite tests (db_test.rs)
 3. Frontend components (update any frontend that references workblocks)
 4. Frontend state/hooks
-5. Cleanup (remove migration code, debug logging, dead code)
-   - db.rs: remove workblock→session migration code in init_db (workblocks table migration, intervals schema migration, total_workblocks UPDATE) — safe once we're confident no old DBs exist
-   - db.rs: remove the two COALESCE(total_sessions, 0) fallbacks in get_archived_day / get_all_archived_dates if total_workblocks column is fully gone
-   - src/types/workblock.ts: delete the old types file (replaced by session.ts)
-   - src/components/WorkblockControl.css: rename to SessionControl.css, update import in SessionControl.tsx
-   - tray.rs: "start_session" menu item id is a string — verify it matches the on_menu_event handler in lib.rs (currently "start_session" on both sides, looks fine but worth a double-check)
-   - SummaryView.tsx / WorkblockControl.tsx (old): verify no orphaned console.log debug statements remain after Stage 3 edits
-   - src/components/WordFrequencyChart.tsx: delete (dead code — nothing imports it after Stage 3)
-   - src/components/WorkblockControl.css: rename to SessionControl.css, update import in SessionControl.tsx
+5. Cleanup (remove migration code, debug logging, dead code) — done:
+   - db.rs: removed all workblock→session migration code from init_db (workblocks table migration, intervals schema migration, total_workblocks UPDATE and ALTER TABLE). intervals table is now created fresh with session_id.
+   - db.rs: COALESCE fallbacks already cleaned up in Stage 2 — get_archived_day and get_all_archived_dates use COALESCE(total_sessions, 0) with no workblocks reference.
+   - src/types/workblock.ts: deleted.
+   - src/components/WordFrequencyChart.tsx: deleted (dead code).
+   - src/components/WorkblockControl.css: renamed to SessionControl.css, import updated in SessionControl.tsx.
+   - tray.rs verified: "start_session" menu item id matches "start_session" handler in lib.rs.
+   - SummaryView.tsx / SessionControl.tsx: no orphaned console.logs found.
+   - All 4 Rust tests pass, TypeScript zero errors.
 6. Final push/verify
 
 Stage 1 is done. Here's a summary of what was changed:

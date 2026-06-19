@@ -51,6 +51,41 @@ The `_guard` naming matters — a plain `_` would drop the lock immediately. The
 
 ---
 
+## Database Migrations
+
+### Schema migrations are standard practice — always have been
+Any time you change a database schema in a live app (rename a table, add a column, change a foreign key), you can't just update the code and ship it. Users already have data stored in the old shape. If your code expects `session_id` but the database has `workblock_id`, the app crashes or silently breaks.
+
+The solution is a **migration** — code that runs on startup (or as a separate step) that detects the old schema and transforms it into the new one. In our case we wrote it manually in Rust:
+
+```rust
+// If old workblocks table exists, copy its rows into sessions
+if sessions_empty && workblocks_exist {
+    conn.execute("INSERT INTO sessions ... SELECT ... FROM workblocks", [])?;
+}
+```
+
+This is the same thing you're doing in Django when you run `python manage.py makemigrations` and `python manage.py migrate` on DigitalOcean. Django just automates the process:
+
+- `makemigrations` — Django detects what changed in your models and generates a migration *file* describing the transformation
+- `migrate` — Django runs all pending migration files against the live database in order
+
+The underlying idea is identical: you need a repeatable, tracked record of how to get from schema version A to schema version B without destroying existing data.
+
+### Migrations have a lifetime — delete them when the transition is over
+Migration code is scaffolding, not permanent infrastructure. Once every live database has been migrated (either because users have opened the app since the migration shipped, or because you're confident no old databases exist), the migration code can be removed. Keeping it forever means future readers have to understand a transition that already happened and will never happen again.
+
+In Django projects this is less of an issue because migration files are small and tracked in version control. But in hand-written migration code (like ours in `init_db`), it's important to delete it once it's served its purpose.
+
+### The three things a schema migration typically handles
+1. **Table renames/additions** — create the new table, copy data from the old one
+2. **Column renames** — add the new column, backfill from the old column, drop the old one
+3. **Data transformations** — convert values to a new format (e.g. status `"completed"` → `"stopped"`)
+
+All three appeared in our workblock→session migration.
+
+---
+
 ## SQL
 
 ### COALESCE for backward compatibility
@@ -75,6 +110,13 @@ A component, type, or function that nothing imports still takes up mental space 
 
 ### Event names are a contract
 When the backend emits `session-stopped` and the frontend listens for `workblock-complete`, nothing errors — the listener just never fires. Event name mismatches are silent failures, which makes them hard to debug. Treat event names the same way you treat API endpoints: both sides have to agree, and they should be defined in one place if possible.
+
+---
+
+## Tauri-specific
+
+### The backend can own window lifecycle, or the frontend can — pick one
+In `PromptWindow`, both the backend (2-second timer → `hide_prompt_window`) and the frontend (`is_last_interval` → `hide_prompt_window_cmd`) were trying to close the window. Neither was wrong on its own, but both doing it created a race condition and confused anyone reading the code. The fix was to commit to one owner — the backend — and remove the frontend's copy. When two layers share responsibility for the same side effect, bugs hide in the overlap.
 
 ---
 

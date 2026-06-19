@@ -32,81 +32,21 @@ pub fn init_db<R: Runtime>(app: &AppHandle<R>) -> Result<Connection> {
         [],
     )?;
 
-    // Migrate from workblocks → sessions if needed
-    let sessions_empty = conn.query_row(
-        "SELECT COUNT(*) FROM sessions", [], |r| r.get::<_, i64>(0),
-    ).unwrap_or(0) == 0;
-
-    let workblocks_exist = conn.query_row(
-        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='workblocks'",
-        [], |r| r.get::<_, i64>(0),
-    ).unwrap_or(0) > 0;
-
-    if sessions_empty && workblocks_exist {
-        conn.execute(
-            "INSERT INTO sessions (id, date, start_time, end_time, status)
-             SELECT id, date, start_time, end_time,
-                 CASE WHEN status IN ('completed', 'cancelled') THEN 'stopped' ELSE 'active' END
-             FROM workblocks",
-            [],
-        )?;
-    }
-
-    // Create or migrate intervals table
-    let intervals_exist = conn.query_row(
-        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='intervals'",
-        [], |r| r.get::<_, i64>(0),
-    ).unwrap_or(0) > 0;
-
-    if !intervals_exist {
-        conn.execute(
-            "CREATE TABLE intervals (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                session_id INTEGER NOT NULL,
-                interval_number INTEGER NOT NULL,
-                start_time DATETIME NOT NULL,
-                end_time DATETIME,
-                words TEXT,
-                status TEXT NOT NULL,
-                recorded_at DATETIME,
-                FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
-            )",
-            [],
-        )?;
-    } else {
-        // Check if old schema (workblock_id) or new (session_id)
-        let has_session_id = {
-            let mut stmt = conn.prepare("PRAGMA table_info(intervals)")?;
-            let mut found = false;
-            let cols = stmt.query_map([], |r| r.get::<_, String>(1))?;
-            for col in cols {
-                if col? == "session_id" { found = true; break; }
-            }
-            found
-        };
-
-        if !has_session_id {
-            conn.execute_batch(
-                "CREATE TABLE intervals_new (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    session_id INTEGER NOT NULL,
-                    interval_number INTEGER NOT NULL,
-                    start_time DATETIME NOT NULL,
-                    end_time DATETIME,
-                    words TEXT,
-                    status TEXT NOT NULL,
-                    recorded_at DATETIME,
-                    FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
-                );
-                INSERT INTO intervals_new
-                    (id, session_id, interval_number, start_time, end_time, words, status, recorded_at)
-                    SELECT id, workblock_id, interval_number, start_time, end_time, words, status, recorded_at
-                    FROM intervals;
-                DROP TABLE intervals;
-                ALTER TABLE intervals_new RENAME TO intervals;"
-            )?;
-        }
-    }
+    // Create intervals table
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS intervals (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id INTEGER NOT NULL,
+            interval_number INTEGER NOT NULL,
+            start_time DATETIME NOT NULL,
+            end_time DATETIME,
+            words TEXT,
+            status TEXT NOT NULL,
+            recorded_at DATETIME,
+            FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+        )",
+        [],
+    )?;
 
     // Create daily_archives table
     conn.execute(
@@ -120,14 +60,6 @@ pub fn init_db<R: Runtime>(app: &AppHandle<R>) -> Result<Connection> {
         )",
         [],
     )?;
-
-    // Migrate daily_archives: add total_sessions column if old schema
-    let _ = conn.execute("ALTER TABLE daily_archives ADD COLUMN total_sessions INTEGER DEFAULT 0", []);
-    let _ = conn.execute(
-        "UPDATE daily_archives SET total_sessions = COALESCE(total_workblocks, 0)
-         WHERE (total_sessions IS NULL OR total_sessions = 0) AND total_workblocks IS NOT NULL",
-        [],
-    );
 
     // Indexes
     conn.execute("CREATE INDEX IF NOT EXISTS idx_sessions_date ON sessions(date)", [])?;

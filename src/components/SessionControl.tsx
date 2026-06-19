@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type { Session, TimerState } from "../types/session";
-import "./WorkblockControl.css";
+import "./SessionControl.css";
 
 type TimerConfigInfo = {
     dev_mode: boolean;
