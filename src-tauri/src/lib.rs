@@ -10,7 +10,7 @@ pub use tray::TrayManager;
 use db::{
     init_db, create_session, get_active_session, stop_session,
     add_interval, update_interval_words, get_intervals_by_session, get_current_interval,
-    check_and_reset_daily, archive_all_unarchived_dates, get_archived_day,
+    check_and_reset_daily, archive_all_unarchived_dates, archive_daily_data, get_archived_day,
     get_all_archived_dates, get_today_date, generate_daily_visualization_data, delete_day,
 };
 use timer::TimerManager;
@@ -81,6 +81,9 @@ async fn stop_session_cmd(app: tauri::AppHandle, session_id: i64) -> Result<Sess
 
     // Finalize in DB (deletes pending intervals, sets end_time + status)
     let stopped = stop_session(&app, session_id).map_err(|e| e.to_string())?;
+
+    // Archive the day now that the session is complete
+    let _ = archive_daily_data(&app, &stopped.date);
 
     let _ = app.emit("session-stopped", session_id);
 

@@ -379,28 +379,12 @@ pub fn check_and_reset_daily<R: Runtime>(app: &AppHandle<R>) -> Result<Option<St
     let today = get_today_date();
     let conn = get_db_connection(app)?;
 
-    // Auto-stop any active sessions from a previous day
-    let result = conn.query_row(
-        "SELECT date FROM sessions WHERE status = 'active' AND date != ?1 LIMIT 1",
-        params![today],
-        |r| r.get::<_, String>(0),
-    );
-
-    if let Ok(previous_date) = result {
-        archive_daily_data(app, &previous_date)?;
-        conn.execute(
-            "UPDATE sessions SET status = 'stopped', end_time = datetime('now')
-             WHERE status = 'active' AND date != ?1",
-            params![today],
-        )?;
-        return Ok(Some(previous_date));
-    }
-
-    // Archive any past days that haven't been archived yet
+    // Archive any past days where all sessions are stopped (never auto-stop active sessions)
     let mut stmt = conn.prepare(
         "SELECT DISTINCT date FROM sessions
          WHERE date != ?1 AND date < ?1
            AND date NOT IN (SELECT date FROM daily_archives)
+           AND date NOT IN (SELECT DISTINCT date FROM sessions WHERE status = 'active')
          ORDER BY date DESC",
     )?;
 
@@ -424,6 +408,7 @@ pub fn archive_all_unarchived_dates<R: Runtime>(app: &AppHandle<R>) -> Result<Ve
         "SELECT DISTINCT date FROM sessions
          WHERE date != ?1 AND date < ?1
            AND date NOT IN (SELECT date FROM daily_archives)
+           AND date NOT IN (SELECT DISTINCT date FROM sessions WHERE status = 'active')
          ORDER BY date DESC",
     )?;
 
@@ -450,12 +435,6 @@ pub fn archive_daily_data<R: Runtime>(app: &AppHandle<R>, date: &str) -> Result<
             Some("No sessions found for date".to_string()),
         ));
     }
-
-    conn.execute(
-        "UPDATE sessions SET status = 'stopped', end_time = COALESCE(end_time, datetime('now'))
-         WHERE date = ?1",
-        params![date],
-    )?;
 
     let viz_data = generate_daily_visualization_data(app, date)?;
     let viz_json = serde_json::to_string(&viz_data)

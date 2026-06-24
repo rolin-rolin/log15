@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import type { DailyVisualizationData, DailyArchive } from "../types/session";
+import type { DailyVisualizationData, DailyArchive, Session } from "../types/session";
 import TimelineChart from "./TimelineChart";
 import ActivityChart from "./ActivityChart";
 import "./SummaryView.css";
@@ -26,7 +26,12 @@ export default function SummaryView({ onBack, date }: SummaryViewProps) {
         setError(null);
 
         try {
-            const targetDate = date || (await invoke<string>("get_today_date_cmd"));
+            // If no date given, use the active session's start date so cross-day sessions show correctly
+            let targetDate = date;
+            if (!targetDate) {
+                const activeSession = await invoke<Session | null>("get_active_session_cmd");
+                targetDate = activeSession?.date ?? (await invoke<string>("get_today_date_cmd"));
+            }
             setDisplayDate(targetDate);
 
             console.log("[SummaryView] Loading for date:", targetDate);
