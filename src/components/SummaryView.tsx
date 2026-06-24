@@ -96,7 +96,7 @@ export default function SummaryView({ onBack, date }: SummaryViewProps) {
         );
     }
 
-    if (!vizData || (vizData.timeline_data.length === 0 && vizData.activity_data.length === 0)) {
+    if (!vizData || vizData.total_sessions === 0) {
         return (
             <div style={{ padding: "40px", textAlign: "center", color: "#666" }}>
                 <p>No summary data available</p>

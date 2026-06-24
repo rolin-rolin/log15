@@ -79,7 +79,6 @@ export default function SessionControl({ onNavigateToSummary, onNavigateToArchiv
         if (!activeSession?.id) return;
         setLoading(true);
         try {
-            try { await invoke("hide_prompt_window_cmd"); } catch { /* ignore */ }
             await invoke("stop_session_cmd", { sessionId: activeSession.id });
             await loadActiveSession();
             await loadTimerState();
