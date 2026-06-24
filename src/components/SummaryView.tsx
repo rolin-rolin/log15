@@ -29,6 +29,8 @@ export default function SummaryView({ onBack, date }: SummaryViewProps) {
             const targetDate = date || (await invoke<string>("get_today_date_cmd"));
             setDisplayDate(targetDate);
 
+            console.log("[SummaryView] Loading for date:", targetDate);
+
             const archive = await invoke<DailyArchive | null>("get_archived_day_cmd", { date: targetDate });
 
             if (archive?.visualization_data) {
@@ -37,7 +39,9 @@ export default function SummaryView({ onBack, date }: SummaryViewProps) {
             } else {
                 setIsArchived(false);
                 const json = await invoke<string>("get_daily_visualization_data_cmd", { date: targetDate });
-                setVizData(JSON.parse(json) as DailyVisualizationData);
+                const parsed = JSON.parse(json) as DailyVisualizationData;
+                console.log("[SummaryView] viz data:", parsed);
+                setVizData(parsed);
             }
         } catch (err) {
             console.error("Failed to load summary data:", err);
@@ -69,6 +73,7 @@ export default function SummaryView({ onBack, date }: SummaryViewProps) {
     if (loading) {
         return (
             <div style={{ padding: "40px", textAlign: "center" }}>
+                {onBack && <button onClick={onBack} className="back-button">← Back</button>}
                 <p>Loading summary data...</p>
             </div>
         );
@@ -77,6 +82,7 @@ export default function SummaryView({ onBack, date }: SummaryViewProps) {
     if (error) {
         return (
             <div style={{ padding: "40px", textAlign: "center", color: "#dc3545" }}>
+                {onBack && <button onClick={onBack} className="back-button">← Back</button>}
                 <p>Error: {error}</p>
                 <button
                     onClick={loadSummaryData}
@@ -99,6 +105,7 @@ export default function SummaryView({ onBack, date }: SummaryViewProps) {
     if (!vizData || vizData.total_sessions === 0) {
         return (
             <div style={{ padding: "40px", textAlign: "center", color: "#666" }}>
+                {onBack && <button onClick={onBack} className="back-button">← Back</button>}
                 <p>No summary data available</p>
                 <p style={{ fontSize: "14px", marginTop: "10px" }}>Start a session to generate summary data.</p>
             </div>
