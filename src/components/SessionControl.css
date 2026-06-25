@@ -28,11 +28,14 @@
 }
 
 .wbc-title {
-    font-size: 32px;
+    font-size: 36px;
     font-weight: 800;
-    letter-spacing: -0.04em;
-    color: var(--text);
+    letter-spacing: -0.05em;
     margin: 0 0 16px;
+    background: var(--grad-title);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
 }
 
 .wbc-nav {
@@ -51,14 +54,15 @@
     font-weight: 500;
     font-family: inherit;
     cursor: pointer;
-    transition: background 0.15s, color 0.15s, border-color 0.15s;
+    transition: background 0.2s, color 0.2s, border-color 0.2s, box-shadow 0.2s;
     box-shadow: var(--shadow-sm);
 }
 
 .wbc-nav-btn:hover {
-    background: var(--accent);
+    background: var(--grad-btn);
     color: white;
     border-color: transparent;
+    box-shadow: 0 4px 14px rgba(99, 102, 241, 0.3);
 }
 
 /* ---- Card shared ---- */
@@ -68,17 +72,46 @@
     border-radius: var(--radius-lg);
     padding: 28px 24px;
     box-shadow: var(--shadow-md);
+    transition: box-shadow 0.3s, border-color 0.3s;
 }
 
-/* ---- Active workblock card ---- */
+/* ---- Active session card ---- */
+.wbc-card--active {
+    border-color: rgba(99, 102, 241, 0.3);
+    box-shadow:
+        0 0 0 1px rgba(99, 102, 241, 0.12),
+        0 8px 32px rgba(99, 102, 241, 0.12),
+        var(--shadow-md);
+}
+
+/* ---- Card title row ---- */
 .wbc-card-title {
-    font-size: 13px;
+    font-size: 12px;
     font-weight: 600;
     text-transform: uppercase;
-    letter-spacing: 0.06em;
+    letter-spacing: 0.08em;
     color: var(--text-2);
     margin: 0 0 20px;
     text-align: center;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+}
+
+/* ---- Live pulse dot ---- */
+.wbc-live-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--success);
+    flex-shrink: 0;
+    animation: livePulse 2s ease-in-out infinite;
+}
+
+@keyframes livePulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(48, 209, 88, 0.55); }
+    50%       { box-shadow: 0 0 0 5px rgba(48, 209, 88, 0); }
 }
 
 .wbc-rows {
@@ -123,7 +156,7 @@
     align-items: center;
     gap: 6px;
     padding: 3px 10px;
-    background: rgba(0, 113, 227, 0.1);
+    background: rgba(99, 102, 241, 0.1);
     color: var(--accent);
     border-radius: 20px;
     font-size: 13px;
@@ -132,84 +165,32 @@
 
 /* Timer countdown */
 .wbc-timer {
-    font-size: 28px;
+    font-size: 44px;
     font-weight: 700;
-    letter-spacing: -0.04em;
+    letter-spacing: -0.05em;
     color: var(--accent);
     font-variant-numeric: tabular-nums;
     text-align: center;
     margin-bottom: 20px;
+    text-shadow: 0 0 28px rgba(99, 102, 241, 0.35);
 }
 
 /* ---- Start form ---- */
 .wbc-form-title {
-    font-size: 13px;
+    font-size: 12px;
     font-weight: 600;
     text-transform: uppercase;
-    letter-spacing: 0.06em;
+    letter-spacing: 0.08em;
     color: var(--text-2);
     margin: 0 0 20px;
     text-align: center;
 }
 
-.wbc-duration-row {
-    display: flex;
-    gap: 12px;
-    justify-content: center;
-    margin-bottom: 8px;
-}
-
-.wbc-duration-field {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 6px;
-}
-
-.wbc-duration-label {
-    font-size: 11px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    color: var(--text-2);
-}
-
-.wbc-select {
-    padding: 10px 14px;
-    font-size: 20px;
-    font-weight: 600;
-    font-family: inherit;
-    font-variant-numeric: tabular-nums;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    background: var(--bg);
-    color: var(--text);
-    width: 110px;
-    text-align: center;
-    cursor: pointer;
-    appearance: auto;
-    transition: border-color 0.15s;
-    box-shadow: var(--shadow-sm);
-}
-
-.wbc-select:focus {
-    outline: none;
-    border-color: var(--accent);
-}
-
-.wbc-duration-hint {
-    font-size: 12px;
-    color: var(--text-2);
-    text-align: center;
-    margin: 6px 0 0;
-    min-height: 18px;
-}
-
 /* ---- Buttons ---- */
 .wbc-btn-primary {
     margin-top: 20px;
-    padding: 14px 24px;
-    background: var(--accent);
+    padding: 15px 24px;
+    background: var(--grad-btn);
     color: white;
     border: none;
     border-radius: var(--radius);
@@ -217,13 +198,21 @@
     font-weight: 600;
     font-family: inherit;
     cursor: pointer;
-    transition: background 0.15s, opacity 0.15s;
+    transition: background 0.2s, box-shadow 0.2s, transform 0.15s, opacity 0.15s;
     width: 100%;
     letter-spacing: -0.01em;
+    box-shadow: 0 4px 16px rgba(99, 102, 241, 0.3);
 }
 
 .wbc-btn-primary:hover:not(:disabled) {
-    background: var(--accent-hover);
+    background: var(--grad-btn-hover);
+    box-shadow: 0 6px 22px rgba(99, 102, 241, 0.45);
+    transform: translateY(-1px);
+}
+
+.wbc-btn-primary:active:not(:disabled) {
+    transform: translateY(0);
+    box-shadow: 0 2px 10px rgba(99, 102, 241, 0.3);
 }
 
 .wbc-btn-primary:disabled {
@@ -242,13 +231,14 @@
     font-weight: 600;
     font-family: inherit;
     cursor: pointer;
-    transition: background 0.15s, color 0.15s;
+    transition: background 0.15s, color 0.15s, box-shadow 0.15s;
     width: 100%;
 }
 
 .wbc-btn-danger:hover:not(:disabled) {
     background: var(--danger);
     color: white;
+    box-shadow: 0 4px 14px rgba(255, 69, 58, 0.3);
 }
 
 .wbc-btn-danger:disabled {

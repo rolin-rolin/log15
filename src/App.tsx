@@ -6,11 +6,19 @@ import SummaryReadyPage from "./pages/SummaryReadyPage";
 import SessionControl from "./components/SessionControl";
 import SummaryView from "./components/SummaryView";
 import ArchiveView from "./components/ArchiveView";
+import type { Session } from "./types/session";
 import "./App.css";
 
 function App() {
     const [currentView, setCurrentView] = useState<string>("main");
+    const [activeSession, setActiveSession] = useState<Session | null | undefined>(undefined);
     const handledIntervalsRef = useRef<Set<number>>(new Set());
+
+    useEffect(() => {
+        invoke<Session | null>("get_active_session_cmd")
+            .then(setActiveSession)
+            .catch(() => setActiveSession(null));
+    }, []);
 
     useEffect(() => {
         let unlistenPromise: Promise<() => void> | null = null;
@@ -97,9 +105,14 @@ function App() {
         );
     }
 
+    if (activeSession === undefined) return null;
+
     return (
         <main className="container">
             <SessionControl
+                activeSession={activeSession}
+                onSessionStart={setActiveSession}
+                onSessionStop={() => setActiveSession(null)}
                 onNavigateToSummary={() => setCurrentView("summary")}
                 onNavigateToArchive={() => setCurrentView("archive")}
             />

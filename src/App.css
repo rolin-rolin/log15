@@ -24,29 +24,35 @@
   --radius-sm:    8px;
   --radius:       12px;
   --radius-lg:    16px;
+  --grad-title:   linear-gradient(135deg, #2997ff 0%, #5e5ce6 55%, #bf5af2 100%);
+  --grad-btn:     linear-gradient(135deg, #0071e3 0%, #5e5ce6 100%);
+  --grad-btn-hover: linear-gradient(135deg, #005bbf 0%, #4b48c4 100%);
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg:           #1c1c1e;
-    --bg-card:      #2c2c2e;
-    --bg-hover:     #3a3a3c;
-    --border:       rgba(255, 255, 255, 0.08);
+    --bg:           #08080f;
+    --bg-card:      #131318;
+    --bg-hover:     #1c1c24;
+    --border:       rgba(255, 255, 255, 0.07);
     --border-focus: rgba(10, 132, 255, 0.6);
     --text:         #f5f5f7;
     --text-2:       #98989d;
-    --text-3:       #636366;
-    --accent:       #0a84ff;
-    --accent-hover: #409cff;
+    --text-3:       #48484d;
+    --accent:       #2997ff;
+    --accent-hover: #5ac8fa;
     --success:      #30d158;
     --danger:       #ff453a;
     --danger-hover: #ff6961;
     --warning-bg:   #2d2200;
     --warning-border:#5c4200;
     --warning-text: #ffd60a;
-    --shadow-sm:    0 1px 3px rgba(0, 0, 0, 0.3);
-    --shadow-md:    0 4px 12px rgba(0, 0, 0, 0.4);
-    --shadow-lg:    0 8px 24px rgba(0, 0, 0, 0.5);
+    --shadow-sm:    0 1px 3px rgba(0, 0, 0, 0.5);
+    --shadow-md:    0 4px 16px rgba(0, 0, 0, 0.6);
+    --shadow-lg:    0 8px 32px rgba(0, 0, 0, 0.7);
+    --grad-title:   linear-gradient(135deg, #5ac8fa 0%, #a78bfa 55%, #f472b6 100%);
+    --grad-btn:     linear-gradient(135deg, #2997ff 0%, #6366f1 100%);
+    --grad-btn-hover: linear-gradient(135deg, #1a88f0 0%, #4f46e5 100%);
   }
 }
 
@@ -76,6 +82,16 @@ body {
   min-height: 100vh;
 }
 
+/* Subtle deep-space glow in dark mode */
+@media (prefers-color-scheme: dark) {
+  body {
+    background:
+      radial-gradient(ellipse at 15% 40%, rgba(99, 102, 241, 0.06) 0%, transparent 55%),
+      radial-gradient(ellipse at 85% 10%, rgba(41, 151, 255, 0.05) 0%, transparent 50%),
+      var(--bg);
+  }
+}
+
 h1, h2, h3, h4 {
   margin: 0;
   font-weight: 600;
@@ -93,10 +109,6 @@ a:hover {
   color: var(--accent-hover);
 }
 
-/* ============================================================
-   Global element overrides (scoped narrowly to avoid
-   clobbering component-specific inputs/buttons)
-   ============================================================ */
 input {
   font-family: inherit;
   color: var(--text);

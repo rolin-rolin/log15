@@ -1,6 +1,5 @@
 import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
 import type { Session, TimerState } from "../types/session";
 import "./SessionControl.css";
 
@@ -12,12 +11,14 @@ type TimerConfigInfo = {
 };
 
 interface SessionControlProps {
+    activeSession: Session | null;
+    onSessionStart: (session: Session) => void;
+    onSessionStop: () => void;
     onNavigateToSummary?: () => void;
     onNavigateToArchive?: () => void;
 }
 
-export default function SessionControl({ onNavigateToSummary, onNavigateToArchive }: SessionControlProps) {
-    const [activeSession, setActiveSession] = useState<Session | null>(null);
+export default function SessionControl({ activeSession, onSessionStart, onSessionStop, onNavigateToSummary, onNavigateToArchive }: SessionControlProps) {
     const [timerState, setTimerState] = useState<TimerState | null>(null);
     const [timerConfig, setTimerConfig] = useState<TimerConfigInfo | null>(null);
     const [timeRemaining, setTimeRemaining] = useState<number | null>(null);
@@ -25,21 +26,13 @@ export default function SessionControl({ onNavigateToSummary, onNavigateToArchiv
     const [showInfo, setShowInfo] = useState(false);
 
     useEffect(() => {
-        loadActiveSession();
         loadTimerState();
         loadTimerConfig();
 
         const interval = setInterval(loadTimerState, 1000);
 
-        let unlistenPromise: Promise<() => void> | null = null;
-        listen("session-stopped", async () => {
-            await loadActiveSession();
-            await loadTimerState();
-        }).then(fn => { unlistenPromise = Promise.resolve(fn); });
-
         return () => {
             clearInterval(interval);
-            unlistenPromise?.then(fn => fn());
         };
     }, []);
 
@@ -47,12 +40,6 @@ export default function SessionControl({ onNavigateToSummary, onNavigateToArchiv
         try {
             setTimerConfig(await invoke<TimerConfigInfo>("get_timer_config_cmd"));
         } catch { /* older backend */ }
-    };
-
-    const loadActiveSession = async () => {
-        try {
-            setActiveSession(await invoke<Session | null>("get_active_session_cmd"));
-        } catch (e) { console.error(e); }
     };
 
     const loadTimerState = async () => {
@@ -66,7 +53,7 @@ export default function SessionControl({ onNavigateToSummary, onNavigateToArchiv
     const handleStart = async () => {
         setLoading(true);
         try {
-            setActiveSession(await invoke<Session>("start_session_cmd"));
+            onSessionStart(await invoke<Session>("start_session_cmd"));
             await loadTimerState();
         } catch (e) {
             alert(`Failed to start session: ${e}`);
@@ -80,7 +67,7 @@ export default function SessionControl({ onNavigateToSummary, onNavigateToArchiv
         setLoading(true);
         try {
             await invoke("stop_session_cmd", { sessionId: activeSession.id });
-            await loadActiveSession();
+            onSessionStop();
             await loadTimerState();
         } catch (e) {
             alert(`Failed to stop session: ${e}`);
@@ -124,8 +111,11 @@ export default function SessionControl({ onNavigateToSummary, onNavigateToArchiv
             </div>
 
             {activeSession ? (
-                <div className="wbc-card">
-                    <p className="wbc-card-title">Active Session</p>
+                <div className="wbc-card wbc-card--active">
+                    <p className="wbc-card-title">
+                        <span className="wbc-live-dot" />
+                        Active Session
+                    </p>
 
                     {timerState?.is_running && timeRemaining !== null && (
                         <div className="wbc-timer">{fmt(timeRemaining)}</div>
