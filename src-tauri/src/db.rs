@@ -114,6 +114,7 @@ pub enum IntervalStatus {
     Pending,
     Recorded,
     AutoAway,
+    StoppedEarly,
 }
 
 impl IntervalStatus {
@@ -122,6 +123,7 @@ impl IntervalStatus {
             IntervalStatus::Pending => "pending",
             IntervalStatus::Recorded => "recorded",
             IntervalStatus::AutoAway => "auto_away",
+            IntervalStatus::StoppedEarly => "stopped_early",
         }
     }
 
@@ -130,6 +132,7 @@ impl IntervalStatus {
             "pending" => IntervalStatus::Pending,
             "recorded" => IntervalStatus::Recorded,
             "auto_away" => IntervalStatus::AutoAway,
+            "stopped_early" => IntervalStatus::StoppedEarly,
             _ => IntervalStatus::Pending,
         }
     }
@@ -217,10 +220,10 @@ pub fn stop_session<R: Runtime>(app: &AppHandle<R>, session_id: i64) -> Result<S
     let conn = get_db_connection(app)?;
     let end_time = Local::now().to_rfc3339();
 
-    // Drop any intervals the user never saw (pending means prompt hadn't fired yet)
+    // Mark any in-progress pending intervals as stopped_early with the stop time
     conn.execute(
-        "DELETE FROM intervals WHERE session_id = ?1 AND status = 'pending'",
-        params![session_id],
+        "UPDATE intervals SET end_time = ?1, status = 'stopped_early' WHERE session_id = ?2 AND status = 'pending'",
+        params![end_time, session_id],
     )?;
 
     conn.execute(
@@ -229,6 +232,15 @@ pub fn stop_session<R: Runtime>(app: &AppHandle<R>, session_id: i64) -> Result<S
     )?;
 
     get_session_by_id(app, session_id)
+}
+
+pub fn set_interval_end_time<R: Runtime>(app: &AppHandle<R>, interval_id: i64, end_time: &str) -> Result<()> {
+    let conn = get_db_connection(app)?;
+    conn.execute(
+        "UPDATE intervals SET end_time = ?1 WHERE id = ?2",
+        params![end_time, interval_id],
+    )?;
+    Ok(())
 }
 
 pub fn get_sessions_by_date<R: Runtime>(app: &AppHandle<R>, date: &str) -> Result<Vec<Session>> {
@@ -290,7 +302,7 @@ pub fn update_interval_words<R: Runtime>(
     let recorded_at = Local::now().to_rfc3339();
 
     conn.execute(
-        "UPDATE intervals SET words = ?1, status = ?2, recorded_at = ?3, end_time = ?3 WHERE id = ?4",
+        "UPDATE intervals SET words = ?1, status = ?2, recorded_at = ?3 WHERE id = ?4",
         params![words, status.as_str(), recorded_at, interval_id],
     )?;
 
@@ -537,6 +549,7 @@ pub struct ActivityData {
 pub struct DailyVisualizationData {
     pub total_sessions: i32,
     pub total_minutes: i32,
+    pub words_entered: i32,
     pub timeline_data: Vec<TimelineData>,
     pub activity_data: Vec<ActivityData>,
 }
@@ -553,10 +566,10 @@ pub fn generate_daily_visualization_data<R: Runtime>(app: &AppHandle<R>, date: &
 
     all_intervals.sort_by(|a, b| a.start_time.cmp(&b.start_time));
 
-    // Only include intervals the user saw (recorded or auto_away), not pending ones
+    // Only include full intervals (recorded or auto_away)
     let timeline_data: Vec<TimelineData> = all_intervals
         .iter()
-        .filter(|i| i.status != IntervalStatus::Pending)
+        .filter(|i| i.status == IntervalStatus::Recorded || i.status == IntervalStatus::AutoAway)
         .map(|i| TimelineData {
             interval_number: i.interval_number,
             start_time: i.start_time.clone(),
@@ -593,9 +606,14 @@ pub fn generate_daily_visualization_data<R: Runtime>(app: &AppHandle<R>, date: &
 
     activity_data.sort_by(|a, b| b.total_minutes.cmp(&a.total_minutes));
 
+    let words_entered = timeline_data.iter()
+        .filter(|t| t.words.as_ref().map_or(false, |w| !w.trim().is_empty()))
+        .count() as i32;
+
     Ok(DailyVisualizationData {
         total_sessions: sessions.len() as i32,
         total_minutes,
+        words_entered,
         timeline_data,
         activity_data,
     })

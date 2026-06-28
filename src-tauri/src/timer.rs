@@ -1,6 +1,6 @@
 use crate::db::{
     add_interval, get_active_session, get_current_interval, get_interval_by_id,
-    update_interval_words, IntervalStatus,
+    set_interval_end_time, update_interval_words, IntervalStatus,
 };
 use crate::window_manager::WindowManager;
 use chrono::{DateTime, Local};
@@ -186,6 +186,9 @@ impl TimerManager {
                 drop(state);
 
                 if let Some(interval_id) = interval_id {
+                    let end_time_str = prompt_time.to_rfc3339();
+                    let _ = set_interval_end_time(&app_clone, interval_id, &end_time_str);
+
                     let _ = app_clone.emit("interval-complete", serde_json::json!({
                         "session_id": session_id,
                         "interval_id": interval_id,

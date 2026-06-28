@@ -138,6 +138,10 @@ export default function SummaryView({ onBack, date }: SummaryViewProps) {
                     <div className="stat-value">{formatDuration(vizData.total_minutes)}</div>
                     <div className="stat-label">Total Time</div>
                 </div>
+                <div className="stat-item">
+                    <div className="stat-value">{vizData.words_entered ?? 0}</div>
+                    <div className="stat-label">Word{(vizData.words_entered ?? 0) !== 1 ? "s" : ""} Entered</div>
+                </div>
             </div>
 
             <div className="summary-content">

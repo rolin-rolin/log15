@@ -43,6 +43,7 @@ export interface ActivityData {
 export interface DailyVisualizationData {
     total_sessions: number;
     total_minutes: number;
+    words_entered: number;
     timeline_data: TimelineData[];
     activity_data: ActivityData[];
 }
